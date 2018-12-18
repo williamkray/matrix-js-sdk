@@ -83,7 +83,7 @@
     "rimraf": "^2.5.4",
     "source-map-support": "^0.4.11",
     "sourceify": "^0.1.0",
-    "uglify-js": "^2.8.26",
+    "uglify-js": "^2.8.29",
     "watchify": "^3.11.0"
   },
   "browserify": {
