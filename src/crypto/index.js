@@ -246,11 +246,9 @@ Crypto.prototype._checkAndStartKeyBackup = async function() {
 
 /**
  * Forces a re-check of the key backup and enables/disables it
- * as appropriate
- *
- * @param {object} backupInfo Backup info from /room_keys/version endpoint
+ * as appropriate.
  */
-Crypto.prototype.checkKeyBackup = async function(backupInfo) {
+Crypto.prototype.checkKeyBackup = async function() {
     this._checkedForBackup = false;
     await this._checkAndStartKeyBackup();
 };
@@ -990,15 +988,17 @@ Crypto.prototype.importRoomKeys = function(keys) {
 /**
  * Schedules sending all keys waiting to be sent to the backup, if not already
  * scheduled. Retries if necessary.
+ *
+ * @param {number} maxDelay Maximum delay to wait in ms. 0 means no delay.
  */
-Crypto.prototype._scheduleKeyBackupSend = async function() {
+Crypto.prototype.scheduleKeyBackupSend = async function(maxDelay = 10000) {
     if (this._sendingBackups) return;
 
     try {
-        // wait between 0 and 10 seconds, to avoid backup
+        // wait between 0 and `maxDelay` seconds, to avoid backup
         // requests from different clients hitting the server all at
         // the same time when a new key is sent
-        const delay = Math.random() * 10000;
+        const delay = Math.random() * maxDelay;
         await Promise.delay(delay);
         let numFailures = 0; // number of consecutive failures
         while (1) {
@@ -1021,6 +1021,9 @@ Crypto.prototype._scheduleKeyBackupSend = async function() {
                         err.data.errcode == 'M_NOT_FOUND' ||
                         err.data.errcode == 'M_WRONG_ROOM_KEYS_VERSION'
                     ) {
+                        // Re-check key backup status on error, so we can be
+                        // sure to present the current situation when asked.
+                        await this.checkKeyBackup();
                         // Backup version has changed or this backup version
                         // has been deleted
                         this.emit("crypto.keyBackupFailed", err.data.errcode);
@@ -1050,6 +1053,9 @@ Crypto.prototype._backupPendingKeys = async function(limit) {
     if (!sessions.length) {
         return 0;
     }
+
+    let remaining = await this._cryptoStore.countSessionsNeedingBackup();
+    this.emit("crypto.keyBackupSessionsRemaining", remaining);
 
     const data = {};
     for (const session of sessions) {
@@ -1087,7 +1093,10 @@ Crypto.prototype._backupPendingKeys = async function(limit) {
         undefined, undefined, this.backupInfo.version,
         {rooms: data},
     );
+
     await this._cryptoStore.unmarkSessionsNeedingBackup(sessions);
+    remaining = await this._cryptoStore.countSessionsNeedingBackup();
+    this.emit("crypto.keyBackupSessionsRemaining", remaining);
 
     return sessions.length;
 };
@@ -1108,10 +1117,14 @@ Crypto.prototype.backupGroupSession = async function(
 
     // don't wait for this to complete: it will delay so
     // happens in the background
-    this._scheduleKeyBackupSend();
+    this.scheduleKeyBackupSend();
 };
 
-Crypto.prototype.backupAllGroupSessions = async function(version) {
+/**
+ * Marks all group sessions as needing to be backed up and schedules them to
+ * upload in the background as soon as possible.
+ */
+Crypto.prototype.scheduleAllGroupSessionsForBackup = async function() {
     await this._cryptoStore.doTxn(
         'readwrite',
         [
@@ -1127,10 +1140,11 @@ Crypto.prototype.backupAllGroupSessions = async function(version) {
         },
     );
 
-    let numKeysBackedUp;
-    do {
-        numKeysBackedUp = await this._backupPendingKeys(KEY_BACKUP_KEYS_PER_REQUEST);
-    } while (numKeysBackedUp > 0);
+    const remaining = await this._cryptoStore.countSessionsNeedingBackup();
+    this.emit("crypto.keyBackupSessionsRemaining", remaining);
+
+    // Schedule keys to upload in the background as soon as possible.
+    this.scheduleKeyBackupSend(0 /* maxDelay */);
 };
 
 /* eslint-disable valid-jsdoc */    //https://github.com/eslint/eslint/issues/7307

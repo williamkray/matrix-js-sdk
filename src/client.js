@@ -448,6 +448,7 @@ MatrixClient.prototype.initCrypto = async function() {
 
     this.reEmitter.reEmit(crypto, [
         "crypto.keyBackupFailed",
+        "crypto.keyBackupSessionsRemaining",
         "crypto.roomKeyRequest",
         "crypto.roomKeyRequestCancellation",
         "crypto.warning",
@@ -842,6 +843,10 @@ MatrixClient.prototype.enableKeyBackup = function(info) {
     this._crypto.backupKey.set_recipient_key(info.auth_data.public_key);
 
     this.emit('crypto.keyBackupStatus', true);
+
+    // There may be keys left over from a partially completed backup, so
+    // schedule a send to check.
+    this._crypto.scheduleKeyBackupSend();
 };
 
 /**
@@ -992,12 +997,16 @@ MatrixClient.prototype.sendKeyBackup = function(roomId, sessionId, version, data
     );
 };
 
-MatrixClient.prototype.backupAllGroupSessions = function(version) {
+/**
+ * Marks all group sessions as needing to be backed up and schedules them to
+ * upload in the background as soon as possible.
+ */
+MatrixClient.prototype.scheduleAllGroupSessionsForBackup = async function() {
     if (this._crypto === null) {
         throw new Error("End-to-end encryption disabled");
     }
 
-    return this._crypto.backupAllGroupSessions(version);
+    await this._crypto.scheduleAllGroupSessionsForBackup();
 };
 
 MatrixClient.prototype.isValidRecoveryKey = function(recoveryKey) {
