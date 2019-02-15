@@ -1,3 +1,46 @@
+Changes in [1.0.0](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v1.0.0) (2019-02-14)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v1.0.0-rc.2...v1.0.0)
+
+ * Try again to commit package-lock.json
+   [\#841](https://github.com/matrix-org/matrix-js-sdk/pull/841)
+
+Changes in [1.0.0-rc.2](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v1.0.0-rc.2) (2019-02-14)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v1.0.0-rc.1...v1.0.0-rc.2)
+
+ * Release script: commit package-lock.json
+   [\#839](https://github.com/matrix-org/matrix-js-sdk/pull/839)
+ * Add method to force re-check of key backup
+   [\#840](https://github.com/matrix-org/matrix-js-sdk/pull/840)
+ * Fix: dont check for unverified devices in left members
+   [\#838](https://github.com/matrix-org/matrix-js-sdk/pull/838)
+
+Changes in [1.0.0-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v1.0.0-rc.1) (2019-02-08)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v0.14.3...v1.0.0-rc.1)
+
+ * change hex SAS verification to decimal and emoji
+   [\#837](https://github.com/matrix-org/matrix-js-sdk/pull/837)
+ * Trust on decrypt
+   [\#836](https://github.com/matrix-org/matrix-js-sdk/pull/836)
+ * Always track our own devices
+   [\#835](https://github.com/matrix-org/matrix-js-sdk/pull/835)
+ * Make linting rules more consistent
+   [\#834](https://github.com/matrix-org/matrix-js-sdk/pull/834)
+ * add method to room to check for unverified devices
+   [\#833](https://github.com/matrix-org/matrix-js-sdk/pull/833)
+ * Merge redesign into develop
+   [\#831](https://github.com/matrix-org/matrix-js-sdk/pull/831)
+ * Supporting infrastructure for educated decisions on when to upgrade rooms
+   [\#830](https://github.com/matrix-org/matrix-js-sdk/pull/830)
+ * Include signature info for unknown devices
+   [\#826](https://github.com/matrix-org/matrix-js-sdk/pull/826)
+ * Flag v2 rooms as "safe"
+   [\#828](https://github.com/matrix-org/matrix-js-sdk/pull/828)
+ * Update ESLint
+   [\#821](https://github.com/matrix-org/matrix-js-sdk/pull/821)
+
 Changes in [0.14.3](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v0.14.3) (2019-01-22)
 ==================================================================================================
 [Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v0.14.3-rc.1...v0.14.3)
