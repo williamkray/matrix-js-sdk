@@ -264,7 +264,7 @@ Crypto.prototype._checkAndStartKeyBackup = async function() {
     if (this._baseApis.isGuest()) {
         console.log("Skipping key backup check since user is guest");
         this._checkedForBackup = true;
-        return;
+        return null;
     }
     let backupInfo;
     try {
@@ -275,30 +275,60 @@ Crypto.prototype._checkAndStartKeyBackup = async function() {
             // well that's told us. we won't try again.
             this._checkedForBackup = true;
         }
-        return;
+        return null;
     }
     this._checkedForBackup = true;
 
     const trustInfo = await this.isKeyBackupTrusted(backupInfo);
 
     if (trustInfo.usable && !this.backupInfo) {
-        console.log("Found usable key backup: enabling key backups");
+        console.log(
+            "Found usable key backup v" + backupInfo.version +
+            ": enabling key backups",
+        );
         this._baseApis.enableKeyBackup(backupInfo);
     } else if (!trustInfo.usable && this.backupInfo) {
         console.log("No usable key backup: disabling key backup");
         this._baseApis.disableKeyBackup();
     } else if (!trustInfo.usable && !this.backupInfo) {
         console.log("No usable key backup: not enabling key backup");
+    } else if (trustInfo.usable && this.backupInfo) {
+        // may not be the same version: if not, we should switch
+        if (backupInfo.version !== this.backupInfo.version) {
+            console.log(
+                "On backup version " + this.backupInfo.version + " but found " +
+                "version " + backupInfo.version + ": switching.",
+            );
+            this._baseApis.disableKeyBackup();
+            this._baseApis.enableKeyBackup(backupInfo);
+        } else {
+            console.log("Backup version " + backupInfo.version + " still current");
+        }
     }
+
+    return {backupInfo, trustInfo};
+};
+
+Crypto.prototype.setTrustedBackupPubKey = async function(trustedPubKey) {
+    // This should be redundant post cross-signing is a thing, so just
+    // plonk it in localStorage for now.
+    this._sessionStore.setLocalTrustedBackupPubKey(trustedPubKey);
+    await this.checkKeyBackup();
 };
 
 /**
  * Forces a re-check of the key backup and enables/disables it
  * as appropriate.
+ *
+ * @return {Object} Object with backup info (as returned by
+ *     getKeyBackupVersion) in backupInfo and
+ *     trust information (as returned by isKeyBackupTrusted)
+ *     in trustInfo.
  */
 Crypto.prototype.checkKeyBackup = async function() {
     this._checkedForBackup = false;
-    await this._checkAndStartKeyBackup();
+    const returnInfo = await this._checkAndStartKeyBackup();
+    return returnInfo;
 };
 
 /**
@@ -315,6 +345,7 @@ Crypto.prototype.checkKeyBackup = async function() {
 Crypto.prototype.isKeyBackupTrusted = async function(backupInfo) {
     const ret = {
         usable: false,
+        trusted_locally: false,
         sigs: [],
     };
 
@@ -325,15 +356,18 @@ Crypto.prototype.isKeyBackupTrusted = async function(backupInfo) {
         !backupInfo.auth_data.public_key ||
         !backupInfo.auth_data.signatures
     ) {
-        console.log("Key backup is absent or missing required data");
+        logger.info("Key backup is absent or missing required data");
         return ret;
     }
 
-    const mySigs = backupInfo.auth_data.signatures[this._userId];
-    if (!mySigs || mySigs.length === 0) {
-        console.log("Ignoring key backup because it lacks any signatures from this user");
-        return ret;
+    const trustedPubkey = this._sessionStore.getLocalTrustedBackupPubKey();
+
+    if (backupInfo.auth_data.public_key === trustedPubkey) {
+        logger.info("Backup public key " + trustedPubkey + " is trusted locally");
+        ret.trusted_locally = true;
     }
+
+    const mySigs = backupInfo.auth_data.signatures[this._userId] || [];
 
     for (const keyId of Object.keys(mySigs)) {
         const sigInfo = { deviceId: keyId.split(':')[1] }; // XXX: is this how we're supposed to get the device ID?
@@ -352,17 +386,20 @@ Crypto.prototype.isKeyBackupTrusted = async function(backupInfo) {
                 );
                 sigInfo.valid = true;
             } catch (e) {
-                console.log("Bad signature from device " + device.deviceId, e);
+                logger.info("Bad signature from device " + device.deviceId, e);
                 sigInfo.valid = false;
             }
         } else {
             sigInfo.valid = null; // Can't determine validity because we don't have the signing device
-            console.log("Ignoring signature from unknown key " + keyId);
+            logger.info("Ignoring signature from unknown key " + keyId);
         }
         ret.sigs.push(sigInfo);
     }
 
-    ret.usable = ret.sigs.some((s) => s.valid && s.device.isVerified());
+    ret.usable = (
+        ret.sigs.some((s) => s.valid && s.device.isVerified()) ||
+        ret.trusted_locally
+    );
     return ret;
 };
 
@@ -1468,6 +1505,10 @@ Crypto.prototype.onSyncCompleted = async function(syncData) {
 
     // catch up on any new devices we got told about during the sync.
     this._deviceList.lastKnownSyncToken = nextSyncToken;
+
+    // we always track our own device list (for key backups etc)
+    this._deviceList.startTrackingDeviceList(this._userId);
+
     this._deviceList.refreshOutdatedDeviceLists();
 
     // we don't start uploading one-time keys until we've caught up with

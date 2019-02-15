@@ -154,7 +154,15 @@ echo "npm version"
 # only turn off both of these behaviours, so we have to
 # manually commit the result.
 npm version --no-git-tag-version "$release"
-git commit package.json -m "$tag"
+
+# commit package-lock.json if it exists, is versioned, and is modified
+if [[ -f package-lock.json && `git status --porcelain package-lock.json | grep '^ M'` ]];
+then
+    pkglock='package-lock.json'
+else
+    pkglock=''
+fi
+git commit package.json $pkglock -m "$tag"
 
 
 # figure out if we should be signing this release
