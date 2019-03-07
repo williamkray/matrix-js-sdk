@@ -228,6 +228,32 @@ function MatrixClient(opts) {
     this._serverSupportsLazyLoading = null;
 
     this._cachedCapabilities = null; // { capabilities: {}, lastUpdated: timestamp }
+
+    // The SDK doesn't really provide a clean way for events to recalculate the push
+    // actions for themselves, so we have to kinda help them out when they are encrypted.
+    // We do this so that push rules are correctly executed on events in their decrypted
+    // state, such as highlights when the user's name is mentioned.
+    this.on("Event.decrypted", (event) => {
+        const oldActions = event.getPushActions();
+        const actions = this._pushProcessor.actionsForEvent(event);
+        event.setPushActions(actions); // Might as well while we're here
+
+        // Ensure the unread counts are kept up to date if the event is encrypted
+        const oldHighlight = oldActions && oldActions.tweaks
+            ? !!oldActions.tweaks.highlight : false;
+        const newHighlight = actions && actions.tweaks
+            ? !!actions.tweaks.highlight : false;
+        if (oldHighlight !== newHighlight) {
+            const room = this.getRoom(event.getRoomId());
+            // TODO: Handle mentions received while the client is offline
+            // See also https://github.com/vector-im/riot-web/issues/9069
+            if (room && !room.hasUserReadEvent(this.getUserId(), event.getId())) {
+                const current = room.getUnreadNotificationCount("highlight");
+                const newCount = newHighlight ? current + 1 : current - 1;
+                room.setUnreadNotificationCount("highlight", newCount);
+            }
+        }
+    });
 }
 utils.inherits(MatrixClient, EventEmitter);
 utils.extend(MatrixClient.prototype, MatrixBaseApis.prototype);
@@ -760,9 +786,10 @@ MatrixClient.prototype.isEventSenderVerified = async function(event) {
  * request.
  * @param  {MatrixEvent} event event of which to cancel and resend the room
  *                            key request.
+ * @return {Promise} A promise that will resolve when the key request is queued
  */
 MatrixClient.prototype.cancelAndResendEventRoomKeyRequest = function(event) {
-    event.cancelAndResendKeyRequest(this._crypto);
+    return event.cancelAndResendKeyRequest(this._crypto, this.getUserId());
 };
 
 /**

@@ -12,6 +12,7 @@ import TestClient from '../TestClient';
 import {MatrixEvent} from '../../lib/models/event';
 import Room from '../../lib/models/room';
 import olmlib from '../../lib/crypto/olmlib';
+import lolex from 'lolex';
 
 const EventEmitter = require("events").EventEmitter;
 
@@ -137,6 +138,11 @@ describe("Crypto", function() {
             )).client;
             await aliceClient.initCrypto();
             await bobClient.initCrypto();
+        });
+
+        afterEach(async function() {
+            aliceClient.stopClient();
+            bobClient.stopClient();
         });
 
         it(
@@ -266,10 +272,95 @@ describe("Crypto", function() {
                 // the room key request should be gone since we've now decypted everything
                 expect(await cryptoStore.getOutgoingRoomKeyRequest(roomKeyRequestBody))
                     .toNotExist();
-
-                aliceClient.stopClient();
-                bobClient.stopClient();
             },
         );
+
+        it("creates a new keyshare request if we request a keyshare", async function() {
+            // make sure that cancelAndResend... creates a new keyshare request
+            // if there wasn't an already-existing one
+            const event = new MatrixEvent({
+                sender: "@bob:example.com",
+                room_id: "!someroom",
+                content: {
+                    algorithm: olmlib.MEGOLM_ALGORITHM,
+                    session_id: "sessionid",
+                    sender_key: "senderkey",
+                },
+            });
+            await aliceClient.cancelAndResendEventRoomKeyRequest(event);
+            const cryptoStore = aliceClient._cryptoStore;
+            const roomKeyRequestBody = {
+                algorithm: olmlib.MEGOLM_ALGORITHM,
+                room_id: "!someroom",
+                session_id: "sessionid",
+                sender_key: "senderkey",
+            };
+            expect(await cryptoStore.getOutgoingRoomKeyRequest(roomKeyRequestBody))
+                .toExist();
+        });
+
+        it("uses a new txnid for re-requesting keys", async function() {
+            const event = new MatrixEvent({
+                sender: "@bob:example.com",
+                room_id: "!someroom",
+                content: {
+                    algorithm: olmlib.MEGOLM_ALGORITHM,
+                    session_id: "sessionid",
+                    sender_key: "senderkey",
+                },
+            });
+            /* return a promise and a function. When the function is called,
+             * the promise will be resolved.
+             */
+            function awaitFunctionCall() {
+                let func;
+                const promise = new Promise((resolve, reject) => {
+                    func = function(...args) {
+                        resolve(args);
+                        return new Promise((resolve, reject) => {
+                            // give us some time to process the result before
+                            // continuing
+                            global.setTimeout(resolve, 1);
+                        });
+                    };
+                });
+                return {func, promise};
+            }
+
+            aliceClient.startClient();
+
+            const clock = lolex.install();
+
+            try {
+                let promise;
+                // make a room key request, and record the transaction ID for the
+                // sendToDevice call
+                ({promise, func: aliceClient.sendToDevice} = awaitFunctionCall());
+                await aliceClient.cancelAndResendEventRoomKeyRequest(event);
+                clock.runToLast();
+                let args = await promise;
+                const txnId = args[2];
+                clock.runToLast();
+
+                // give the room key request manager time to update the state
+                // of the request
+                await Promise.resolve();
+
+                // cancel and resend the room key request
+                ({promise, func: aliceClient.sendToDevice} = awaitFunctionCall());
+                await aliceClient.cancelAndResendEventRoomKeyRequest(event);
+                clock.runToLast();
+                // the first call to sendToDevice will be the cancellation
+                args = await promise;
+                // the second call to sendToDevice will be the key request
+                ({promise, func: aliceClient.sendToDevice} = awaitFunctionCall());
+                clock.runToLast();
+                args = await promise;
+                clock.runToLast();
+                expect(args[2]).toNotBe(txnId);
+            } finally {
+                clock.uninstall();
+            }
+        });
     });
 });
