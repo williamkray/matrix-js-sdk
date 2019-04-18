@@ -1,6 +1,6 @@
 /*
 Copyright 2015, 2016 OpenMarket Ltd
-Copyright 2018 New Vector Ltd
+Copyright 2018, 2019 New Vector Ltd
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ import ReEmitter from '../ReEmitter';
 // to upgrade (ie: "stable"). Eventually, we should remove these when all homeservers
 // return an m.room_versions capability.
 const KNOWN_SAFE_ROOM_VERSION = '1';
-const SAFE_ROOM_VERSIONS = ['1', '2'];
+const SAFE_ROOM_VERSIONS = ['1', '2', '3'];
 
 function synthesizeReceipt(userId, event, receiptType) {
     // console.log("synthesizing receipt for "+event.getId());
@@ -496,7 +496,7 @@ Room.prototype.loadMembersIfNeeded = function() {
     const inMemoryUpdate = this._loadMembers().then((result) => {
         this.currentState.setOutOfBandMembers(result.memberEvents);
         // now the members are loaded, start to track the e2e devices if needed
-        if (this._client.isRoomEncrypted(this.roomId)) {
+        if (this._client.isCryptoEnabled() && this._client.isRoomEncrypted(this.roomId)) {
             this._client._crypto.trackRoomDevices(this.roomId);
         }
         return result.fromServer;
@@ -598,6 +598,11 @@ Room.prototype._fixUpLegacyTimelineFields = function() {
 
 /**
  * Returns whether there are any devices in the room that are unverified
+ *
+ * Note: Callers should first check if crypto is enabled on this device. If it is
+ * disabled, then we aren't tracking room devices at all, so we can't answer this, and an
+ * error will be thrown.
+ *
  * @return {bool} the result
  */
 Room.prototype.hasUnverifiedDevices = async function() {

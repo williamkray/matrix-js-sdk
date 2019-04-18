@@ -242,19 +242,32 @@ function MatrixClient(opts) {
         const actions = this._pushProcessor.actionsForEvent(event);
         event.setPushActions(actions); // Might as well while we're here
 
+        const room = this.getRoom(event.getRoomId());
+        if (!room) return;
+
+        const currentCount = room.getUnreadNotificationCount("highlight");
+
         // Ensure the unread counts are kept up to date if the event is encrypted
+        // We also want to make sure that the notification count goes up if we already
+        // have encrypted events to avoid other code from resetting 'highlight' to zero.
         const oldHighlight = oldActions && oldActions.tweaks
             ? !!oldActions.tweaks.highlight : false;
         const newHighlight = actions && actions.tweaks
             ? !!actions.tweaks.highlight : false;
-        if (oldHighlight !== newHighlight) {
-            const room = this.getRoom(event.getRoomId());
+        if (oldHighlight !== newHighlight || currentCount > 0) {
             // TODO: Handle mentions received while the client is offline
             // See also https://github.com/vector-im/riot-web/issues/9069
-            if (room && !room.hasUserReadEvent(this.getUserId(), event.getId())) {
-                const current = room.getUnreadNotificationCount("highlight");
-                const newCount = newHighlight ? current + 1 : current - 1;
+            if (!room.hasUserReadEvent(this.getUserId(), event.getId())) {
+                let newCount = currentCount;
+                if (newHighlight && !oldHighlight) newCount++;
+                if (!newHighlight && oldHighlight) newCount--;
                 room.setUnreadNotificationCount("highlight", newCount);
+
+                // Fix 'Mentions Only' rooms from not having the right badge count
+                const totalCount = room.getUnreadNotificationCount('total');
+                if (totalCount < newCount) {
+                    room.setUnreadNotificationCount('total', newCount);
+                }
             }
         }
     });
@@ -432,9 +445,10 @@ MatrixClient.prototype.setNotifTimelineSet = function(notifTimelineSet) {
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixClient.prototype.getCapabilities = function() {
+    const now = new Date().getTime();
+
     if (this._cachedCapabilities) {
-        const now = new Date().getTime();
-        if (now - this._cachedCapabilities.lastUpdated <= CAPABILITIES_CACHE_MS) {
+        if (now < this._cachedCapabilities.expiration) {
             console.log("Returning cached capabilities");
             return Promise.resolve(this._cachedCapabilities.capabilities);
         }
@@ -443,12 +457,22 @@ MatrixClient.prototype.getCapabilities = function() {
     // We swallow errors because we need a default object anyhow
     return this._http.authedRequest(
         undefined, "GET", "/capabilities",
-    ).catch(() => null).then((r) => {
+    ).catch((e) => {
+        console.error(e);
+        return null; // otherwise consume the error
+    }).then((r) => {
         if (!r) r = {};
         const capabilities = r["capabilities"] || {};
+
+        // If the capabilities missed the cache, cache it for a shorter amount
+        // of time to try and refresh them later.
+        const cacheMs = Object.keys(capabilities).length
+            ? CAPABILITIES_CACHE_MS
+            : 60000 + (Math.random() * 5000);
+
         this._cachedCapabilities = {
             capabilities: capabilities,
-            lastUpdated: new Date().getTime(),
+            expiration: now + cacheMs,
         };
 
         console.log("Caching capabilities: ", capabilities);
@@ -491,6 +515,7 @@ MatrixClient.prototype.initCrypto = async function() {
     }
 
     // initialise the list of encrypted rooms (whether or not crypto is enabled)
+    console.log("Crypto: initialising roomlist...");
     await this._roomList.init();
 
     const userId = this.getUserId();
@@ -525,6 +550,7 @@ MatrixClient.prototype.initCrypto = async function() {
         "crypto.warning",
     ]);
 
+    console.log("Crypto: initialising crypto object...");
     await crypto.init();
 
     this.olmVersion = Crypto.getOlmVersion();

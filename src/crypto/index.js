@@ -197,8 +197,11 @@ utils.inherits(Crypto, EventEmitter);
  * Returns a promise which resolves once the crypto module is ready for use.
  */
 Crypto.prototype.init = async function() {
+    console.log("Crypto: initialising Olm...");
     await global.Olm.init();
+    console.log("Crypto: initialising Olm device...");
     await this._olmDevice.init();
+    console.log("Crypto: loading device list...");
     await this._deviceList.load();
 
     // build our device keys: these will later be uploaded
@@ -207,6 +210,7 @@ Crypto.prototype.init = async function() {
     this._deviceKeys["curve25519:" + this._deviceId] =
         this._olmDevice.deviceCurve25519Key;
 
+    console.log("Crypto: fetching own devices...");
     let myDevices = this._deviceList.getRawStoredDevicesForUser(
         this._userId,
     );
@@ -217,6 +221,7 @@ Crypto.prototype.init = async function() {
 
     if (!myDevices[this._deviceId]) {
         // add our own deviceinfo to the cryptoStore
+        console.log("Crypto: adding this device to the store...");
         const deviceInfo = {
             keys: this._deviceKeys,
             algorithms: this._supportedAlgorithms,
@@ -231,6 +236,7 @@ Crypto.prototype.init = async function() {
         this._deviceList.saveIfDirty();
     }
 
+    console.log("Crypto: checking for key backup...");
     this._checkAndStartKeyBackup();
 };
 
@@ -351,7 +357,12 @@ Crypto.prototype.isKeyBackupTrusted = async function(backupInfo) {
     const mySigs = backupInfo.auth_data.signatures[this._userId] || [];
 
     for (const keyId of Object.keys(mySigs)) {
-        const sigInfo = { deviceId: keyId.split(':')[1] }; // XXX: is this how we're supposed to get the device ID?
+        const keyIdParts = keyId.split(':');
+        if (keyIdParts[0] !== 'ed25519') {
+            console.log("Ignoring unknown signature type: " + keyIdParts[0]);
+            continue;
+        }
+        const sigInfo = { deviceId: keyIdParts[1] }; // XXX: is this how we're supposed to get the device ID?
         const device = this._deviceList.getStoredDevice(
             this._userId, sigInfo.deviceId,
         );
@@ -367,7 +378,7 @@ Crypto.prototype.isKeyBackupTrusted = async function(backupInfo) {
                 );
                 sigInfo.valid = true;
             } catch (e) {
-                logger.info("Bad signature from device " + device.deviceId, e);
+                logger.info("Bad signature from key ID " + keyId, e);
                 sigInfo.valid = false;
             }
         } else {
