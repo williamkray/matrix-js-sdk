@@ -21,7 +21,11 @@ Please check [the working browser example](examples/browser) for more informatio
 In Node.js
 ----------
 
-``npm install matrix-js-sdk``
+Ensure you have the latest LTS version of Node.js installed.
+
+Using `yarn` instead of `npm` is recommended. Please see the Yarn [install guide](https://yarnpkg.com/docs/install/) if you do not have it already.
+
+``yarn add matrix-js-sdk``
 
 ```javascript
   var sdk = require("matrix-js-sdk");
@@ -76,7 +80,7 @@ client.on("Room.timeline", function(event, room, toStartOfTimeline) {
 });
 ```
 
-By default, the `matrix-js-sdk` client uses the `MatrixInMemoryStore` to store events as they are received. For example to iterate through the currently stored timeline for a room:
+By default, the `matrix-js-sdk` client uses the `MemoryStore` to store events as they are received. For example to iterate through the currently stored timeline for a room:
 
 ```javascript
 Object.keys(client.store.rooms).forEach((roomId) => {
@@ -283,7 +287,7 @@ This SDK uses JSDoc3 style comments. You can manually build and
 host the API reference from the source files like this:
 
 ```
-  $ npm run gendoc
+  $ yarn gendoc
   $ cd .jsdoc
   $ python -m SimpleHTTPServer 8005
 ```
@@ -293,9 +297,9 @@ Then visit ``http://localhost:8005`` to see the API docs.
 End-to-end encryption support
 =============================
 
-The SDK supports end-to-end encryption via the Olm and Megolm protocols, using
-[libolm](http://matrix.org/git/olm). It is left up to the application to make
-libolm available, via the ``Olm`` global.
+The SDK supports end-to-end encryption via the and Megolm protocols, using
+[libolm](https://gitlab.matrix.org/matrix-org/olm). It is left up to the 
+application to make libolm available, via the ``Olm`` global.
 
 It is also necessry to call ``matrixClient.initCrypto()`` after creating a new
 ``MatrixClient`` (but **before** calling ``matrixClient.startClient()``) to
@@ -314,20 +318,20 @@ specification.
 
 To provide the Olm library in a browser application:
 
- * download the transpiled libolm (from https://matrix.org/packages/npm/olm/).
+ * download the transpiled libolm (from https://packages.matrix.org/npm/olm/).
  * load ``olm.js`` as a ``<script>`` *before* ``browser-matrix.js``.
  
 To provide the Olm library in a node.js application:
 
- * ``npm install https://matrix.org/packages/npm/olm/olm-3.0.0.tgz``
+ * ``yarn add https://packages.matrix.org/npm/olm/olm-3.0.0.tgz``
    (replace the URL with the latest version you want to use from
-    https://matrix.org/packages/npm/olm/)
+    https://packages.matrix.org/npm/olm/)
  * ``global.Olm = require('olm');`` *before* loading ``matrix-js-sdk``.
 
-If you want to package Olm as dependency for your node.js application, you
-can use ``npm install https://matrix.org/packages/npm/olm/olm-3.0.0.tgz
---save-optional`` (if your application also works without e2e crypto enabled)
-or ``--save`` (if it doesn't) to do so.
+If you want to package Olm as dependency for your node.js application, you can
+use ``yarn add https://packages.matrix.org/npm/olm/olm-3.0.0.tgz``. If your
+application also works without e2e crypto enabled, add ``--optional`` to mark it
+as an optional dependency.
 
 
 Contributing
@@ -337,7 +341,7 @@ want to use this SDK, skip this section.*
 
 First, you need to pull in the right build tools:
 ```
- $ npm install
+ $ yarn install
 ```
 
 Building
@@ -345,20 +349,20 @@ Building
 
 To build a browser version from scratch when developing::
 ```
- $ npm run build
+ $ yarn build
 ```
 
 To constantly do builds when files are modified (using ``watchify``)::
 ```
- $ npm run watch
+ $ yarn watch
 ```
 
 To run tests (Jasmine)::
 ```
- $ npm test
+ $ yarn test
 ```
 
 To run linting:
 ```
- $ npm run lint
+ $ yarn lint
 ```

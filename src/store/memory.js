@@ -17,7 +17,7 @@ limitations under the License.
 */
 "use strict";
 /**
- * This is an internal module. See {@link MatrixInMemoryStore} for the public class.
+ * This is an internal module. See {@link MemoryStore} for the public class.
  * @module store/memory
  */
 const utils = require("../utils");
@@ -31,7 +31,7 @@ import Promise from 'bluebird';
  * @param {LocalStorage} opts.localStorage The local storage instance to persist
  * some forms of data such as tokens. Rooms will NOT be stored.
  */
-module.exports.MatrixInMemoryStore = function MatrixInMemoryStore(opts) {
+module.exports.MemoryStore = function MemoryStore(opts) {
     opts = opts || {};
     this.rooms = {
         // roomId: Room
@@ -58,7 +58,7 @@ module.exports.MatrixInMemoryStore = function MatrixInMemoryStore(opts) {
     this._clientOptions = {};
 };
 
-module.exports.MatrixInMemoryStore.prototype = {
+module.exports.MemoryStore.prototype = {
 
     /**
      * Retrieve the token to stream from.
@@ -385,6 +385,7 @@ module.exports.MatrixInMemoryStore.prototype = {
         };
         return Promise.resolve();
     },
+
     /**
      * Returns the out-of-band membership events for this room that
      * were previously loaded.
@@ -395,6 +396,7 @@ module.exports.MatrixInMemoryStore.prototype = {
     getOutOfBandMembers: function(roomId) {
         return Promise.resolve(this._oobMembers[roomId] || null);
     },
+
     /**
      * Stores the out-of-band membership events for this room. Note that
      * it still makes sense to store an empty array as the OOB status for the room is
@@ -405,6 +407,11 @@ module.exports.MatrixInMemoryStore.prototype = {
      */
     setOutOfBandMembers: function(roomId, membershipEvents) {
         this._oobMembers[roomId] = membershipEvents;
+        return Promise.resolve();
+    },
+
+    clearOutOfBandMembers: function() {
+        this._oobMembers = {};
         return Promise.resolve();
     },
 

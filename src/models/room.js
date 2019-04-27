@@ -1,6 +1,6 @@
 /*
 Copyright 2015, 2016 OpenMarket Ltd
-Copyright 2018 New Vector Ltd
+Copyright 2018, 2019 New Vector Ltd
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ import ReEmitter from '../ReEmitter';
 // to upgrade (ie: "stable"). Eventually, we should remove these when all homeservers
 // return an m.room_versions capability.
 const KNOWN_SAFE_ROOM_VERSION = '1';
-const SAFE_ROOM_VERSIONS = ['1', '2'];
+const SAFE_ROOM_VERSIONS = ['1', '2', '3'];
 
 function synthesizeReceipt(userId, event, receiptType) {
     // console.log("synthesizing receipt for "+event.getId());
@@ -260,6 +260,8 @@ Room.prototype.getRecommendedVersion = async function() {
     }
 
     const currentVersion = this.getVersion();
+    console.log(`[${this.roomId}] Current version: ${currentVersion}`);
+    console.log(`[${this.roomId}] Version capability: `, versionCap);
 
     const result = {
         version: currentVersion,
@@ -280,6 +282,11 @@ Room.prototype.getRecommendedVersion = async function() {
         result.version = versionCap.default;
         result.needsUpgrade = true;
         result.urgent = !!this.getVersion().match(/^[0-9]+[0-9.]*$/g);
+        if (result.urgent) {
+            console.warn(`URGENT upgrade required on ${this.roomId}`);
+        } else {
+            console.warn(`Non-urgent upgrade required on ${this.roomId}`);
+        }
         return Promise.resolve(result);
     }
 
@@ -489,7 +496,7 @@ Room.prototype.loadMembersIfNeeded = function() {
     const inMemoryUpdate = this._loadMembers().then((result) => {
         this.currentState.setOutOfBandMembers(result.memberEvents);
         // now the members are loaded, start to track the e2e devices if needed
-        if (this._client.isRoomEncrypted(this.roomId)) {
+        if (this._client.isCryptoEnabled() && this._client.isRoomEncrypted(this.roomId)) {
             this._client._crypto.trackRoomDevices(this.roomId);
         }
         return result.fromServer;
@@ -591,6 +598,11 @@ Room.prototype._fixUpLegacyTimelineFields = function() {
 
 /**
  * Returns whether there are any devices in the room that are unverified
+ *
+ * Note: Callers should first check if crypto is enabled on this device. If it is
+ * disabled, then we aren't tracking room devices at all, so we can't answer this, and an
+ * error will be thrown.
+ *
  * @return {bool} the result
  */
 Room.prototype.hasUnverifiedDevices = async function() {
@@ -1422,6 +1434,40 @@ Room.prototype.getEventReadUpTo = function(userId, ignoreSynthesized) {
     }
 
     return receipts["m.read"][userId].eventId;
+};
+
+/**
+ * Determines if the given user has read a particular event ID with the known
+ * history of the room. This is not a definitive check as it relies only on
+ * what is available to the room at the time of execution.
+ * @param {String} userId The user ID to check the read state of.
+ * @param {String} eventId The event ID to check if the user read.
+ * @returns {Boolean} True if the user has read the event, false otherwise.
+ */
+Room.prototype.hasUserReadEvent = function(userId, eventId) {
+    const readUpToId = this.getEventReadUpTo(userId, false);
+    if (readUpToId === eventId) return true;
+
+    if (this.timeline.length
+        && this.timeline[this.timeline.length - 1].getSender()
+        && this.timeline[this.timeline.length - 1].getSender() === userId) {
+        // It doesn't matter where the event is in the timeline, the user has read
+        // it because they've sent the latest event.
+        return true;
+    }
+
+    for (let i = this.timeline.length - 1; i >= 0; --i) {
+        const ev = this.timeline[i];
+
+        // If we encounter the target event first, the user hasn't read it
+        // however if we encounter the readUpToId first then the user has read
+        // it. These rules apply because we're iterating bottom-up.
+        if (ev.getId() === eventId) return false;
+        if (ev.getId() === readUpToId) return true;
+    }
+
+    // We don't know if the user has read it, so assume not.
+    return false;
 };
 
 /**

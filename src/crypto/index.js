@@ -134,9 +134,9 @@ export default function Crypto(baseApis, sessionStore, userId, deviceId,
     this._checkedForBackup = false; // Have we checked the server for a backup we can use?
     this._sendingBackups = false; // Are we currently sending backups?
 
-    this._olmDevice = new OlmDevice(sessionStore, cryptoStore);
+    this._olmDevice = new OlmDevice(cryptoStore);
     this._deviceList = new DeviceList(
-        baseApis, cryptoStore, sessionStore, this._olmDevice,
+        baseApis, cryptoStore, this._olmDevice,
     );
 
     // the last time we did a check for the number of one-time-keys on the
@@ -197,27 +197,11 @@ utils.inherits(Crypto, EventEmitter);
  * Returns a promise which resolves once the crypto module is ready for use.
  */
 Crypto.prototype.init = async function() {
+    console.log("Crypto: initialising Olm...");
     await global.Olm.init();
-
-    const sessionStoreHasAccount = Boolean(this._sessionStore.getEndToEndAccount());
-    let cryptoStoreHasAccount;
-    await this._cryptoStore.doTxn(
-        'readonly', [IndexedDBCryptoStore.STORE_ACCOUNT], (txn) => {
-            this._cryptoStore.getAccount(txn, (pickledAccount) => {
-                cryptoStoreHasAccount = Boolean(pickledAccount);
-            });
-        },
-    );
-    if (sessionStoreHasAccount && !cryptoStoreHasAccount) {
-        // we're about to migrate to the crypto store
-        this.emit("crypto.warning", 'CRYPTO_WARNING_ACCOUNT_MIGRATED');
-    } else if (sessionStoreHasAccount && cryptoStoreHasAccount) {
-        // There's an account in both stores: an old version of
-        // the code has been run against this store.
-        this.emit("crypto.warning", 'CRYPTO_WARNING_OLD_VERSION_DETECTED');
-    }
-
+    console.log("Crypto: initialising Olm device...");
     await this._olmDevice.init();
+    console.log("Crypto: loading device list...");
     await this._deviceList.load();
 
     // build our device keys: these will later be uploaded
@@ -226,6 +210,7 @@ Crypto.prototype.init = async function() {
     this._deviceKeys["curve25519:" + this._deviceId] =
         this._olmDevice.deviceCurve25519Key;
 
+    console.log("Crypto: fetching own devices...");
     let myDevices = this._deviceList.getRawStoredDevicesForUser(
         this._userId,
     );
@@ -235,7 +220,8 @@ Crypto.prototype.init = async function() {
     }
 
     if (!myDevices[this._deviceId]) {
-        // add our own deviceinfo to the sessionstore
+        // add our own deviceinfo to the cryptoStore
+        console.log("Crypto: adding this device to the store...");
         const deviceInfo = {
             keys: this._deviceKeys,
             algorithms: this._supportedAlgorithms,
@@ -250,6 +236,7 @@ Crypto.prototype.init = async function() {
         this._deviceList.saveIfDirty();
     }
 
+    console.log("Crypto: checking for key backup...");
     this._checkAndStartKeyBackup();
 };
 
@@ -370,7 +357,12 @@ Crypto.prototype.isKeyBackupTrusted = async function(backupInfo) {
     const mySigs = backupInfo.auth_data.signatures[this._userId] || [];
 
     for (const keyId of Object.keys(mySigs)) {
-        const sigInfo = { deviceId: keyId.split(':')[1] }; // XXX: is this how we're supposed to get the device ID?
+        const keyIdParts = keyId.split(':');
+        if (keyIdParts[0] !== 'ed25519') {
+            console.log("Ignoring unknown signature type: " + keyIdParts[0]);
+            continue;
+        }
+        const sigInfo = { deviceId: keyIdParts[1] }; // XXX: is this how we're supposed to get the device ID?
         const device = this._deviceList.getStoredDevice(
             this._userId, sigInfo.deviceId,
         );
@@ -386,7 +378,7 @@ Crypto.prototype.isKeyBackupTrusted = async function(backupInfo) {
                 );
                 sigInfo.valid = true;
             } catch (e) {
-                logger.info("Bad signature from device " + device.deviceId, e);
+                logger.info("Bad signature from key ID " + keyId, e);
                 sigInfo.valid = false;
             }
         } else {
@@ -942,7 +934,7 @@ Crypto.prototype.forceDiscardSession = function(roomId) {
 };
 
 /**
- * Configure a room to use encryption (ie, save a flag in the sessionstore).
+ * Configure a room to use encryption (ie, save a flag in the cryptoStore).
  *
  * @param {string} roomId The room ID to enable encryption in.
  *
@@ -1426,10 +1418,14 @@ Crypto.prototype.handleDeviceListChanges = async function(syncData, syncDeviceLi
  *
  * @param {module:crypto~RoomKeyRequestBody} requestBody
  * @param {Array<{userId: string, deviceId: string}>} recipients
+ * @param {boolean} resend whether to resend the key request if there is
+ *    already one
+ *
+ * @return {Promise} a promise that resolves when the key request is queued
  */
-Crypto.prototype.requestRoomKey = function(requestBody, recipients) {
-    this._outgoingRoomKeyRequestManager.sendRoomKeyRequest(
-        requestBody, recipients,
+Crypto.prototype.requestRoomKey = function(requestBody, recipients, resend=false) {
+    return this._outgoingRoomKeyRequestManager.sendRoomKeyRequest(
+        requestBody, recipients, resend,
     ).catch((e) => {
         // this normally means we couldn't talk to the store
         logger.error(
@@ -1443,11 +1439,9 @@ Crypto.prototype.requestRoomKey = function(requestBody, recipients) {
  *
  * @param {module:crypto~RoomKeyRequestBody} requestBody
  *    parameters to match for cancellation
- * @param {boolean} andResend
- *    if true, resend the key request after cancelling.
  */
-Crypto.prototype.cancelRoomKeyRequest = function(requestBody, andResend) {
-    this._outgoingRoomKeyRequestManager.cancelRoomKeyRequest(requestBody, andResend)
+Crypto.prototype.cancelRoomKeyRequest = function(requestBody) {
+    this._outgoingRoomKeyRequestManager.cancelRoomKeyRequest(requestBody)
     .catch((e) => {
         logger.warn("Error clearing pending room key requests", e);
     }).done();
@@ -1984,7 +1978,7 @@ Crypto.prototype._onToDeviceBadEncrypted = async function(event) {
             sender, device.deviceId,
         );
     for (const keyReq of requestsToResend) {
-        this.cancelRoomKeyRequest(keyReq.requestBody, true);
+        this.requestRoomKey(keyReq.requestBody, keyReq.recipients, true);
     }
 };
 
@@ -2355,17 +2349,6 @@ class IncomingRoomKeyRequestCancellation {
 /**
  * Fires when the app may wish to warn the user about something related
  * the end-to-end crypto.
- *
- * Comes with a type which is one of:
- * * CRYPTO_WARNING_ACCOUNT_MIGRATED: Account data has been migrated from an older
- *       version of the store in such a way that older clients will no longer be
- *       able to read it. The app may wish to warn the user against going back to
- *       an older version of the app.
- * * CRYPTO_WARNING_OLD_VERSION_DETECTED: js-sdk has detected that an older version
- *       of js-sdk has been run against the same store after a migration has been
- *       performed. This is likely have caused unexpected behaviour in the old
- *       version. For example, the old version and the new version may have two
- *       different identity keys.
  *
  * @event module:client~MatrixClient#"crypto.warning"
  * @param {string} type One of the strings listed above
