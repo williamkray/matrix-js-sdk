@@ -92,9 +92,12 @@ function synthesizeReceipt(userId, event, receiptType) {
  * "<b>detached</b>", pending messages will appear in a separate list,
  * accessbile via {@link module:models/room#getPendingEvents}. Default:
  * "chronological".
- *
  * @param {boolean} [opts.timelineSupport = false] Set to true to enable improved
  * timeline support.
+ * @param {boolean} [opts.unstableClientRelationAggregation = false]
+ * Optional. Set to true to enable client-side aggregation of event relations
+ * via `EventTimelineSet#getRelationsForEvent`.
+ * This feature is currently unstable and the API may change without notice.
  *
  * @prop {string} roomId The ID of this room.
  * @prop {string} name The human-readable display name for this room.
@@ -1097,7 +1100,11 @@ Room.prototype.addPendingEvent = function(event, txnId) {
 
     this._txnToEvent[txnId] = event;
 
-    if (this._opts.pendingEventOrdering == "detached") {
+    // TODO: We currently ignore `pendingEventOrdering` for relation events.
+    // They are aggregated by the timeline set, and we want that to happen right
+    // away for easy local echo, but it complicates what should be a general
+    // code path by branching on the event type.
+    if (!event.isRelation() && this._opts.pendingEventOrdering == "detached") {
         if (this._pendingEventList.some((e) => e.status === EventStatus.NOT_SENT)) {
             console.warn("Setting event as NOT_SENT due to messages in the same state");
             event.status = EventStatus.NOT_SENT;
