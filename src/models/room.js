@@ -1004,7 +1004,6 @@ Room.prototype.removeFilteredTimelineSet = function(filter) {
  * @private
  */
 Room.prototype._addLiveEvent = function(event, duplicateStrategy) {
-    let i;
     if (event.getType() === "m.room.redaction") {
         const redactId = event.event.redacts;
 
@@ -1038,7 +1037,7 @@ Room.prototype._addLiveEvent = function(event, duplicateStrategy) {
     }
 
     // add to our timeline sets
-    for (i = 0; i < this._timelineSets.length; i++) {
+    for (let i = 0; i < this._timelineSets.length; i++) {
         this._timelineSets[i].addLiveEvent(event, duplicateStrategy);
     }
 
@@ -1100,16 +1099,30 @@ Room.prototype.addPendingEvent = function(event, txnId) {
 
     this._txnToEvent[txnId] = event;
 
-    // TODO: We currently ignore `pendingEventOrdering` for relation events.
-    // They are aggregated by the timeline set, and we want that to happen right
-    // away for easy local echo, but it complicates what should be a general
-    // code path by branching on the event type.
-    if (!event.isRelation() && this._opts.pendingEventOrdering == "detached") {
+    if (this._opts.pendingEventOrdering == "detached") {
         if (this._pendingEventList.some((e) => e.status === EventStatus.NOT_SENT)) {
             console.warn("Setting event as NOT_SENT due to messages in the same state");
-            event.status = EventStatus.NOT_SENT;
+            event.setStatus(EventStatus.NOT_SENT);
         }
         this._pendingEventList.push(event);
+
+        if (event.isRelation()) {
+            // For pending events, add them to the relations collection immediately.
+            // (The alternate case below already covers this as part of adding to
+            // the timeline set.)
+            // TODO: We should consider whether this means it would be a better
+            // design to lift the relations handling up to the room instead.
+            for (let i = 0; i < this._timelineSets.length; i++) {
+                const timelineSet = this._timelineSets[i];
+                if (timelineSet.getFilter()) {
+                    if (this._filter.filterRoomTimeline([event]).length) {
+                        timelineSet.aggregateRelations(event);
+                    }
+                } else {
+                    timelineSet.aggregateRelations(event);
+                }
+            }
+        }
     } else {
         for (let i = 0; i < this._timelineSets.length; i++) {
             const timelineSet = this._timelineSets[i];
@@ -1248,7 +1261,7 @@ Room.prototype.updatePendingEvent = function(event, newStatus, newEventId) {
                         newStatus);
     }
 
-    event.status = newStatus;
+    event.setStatus(newStatus);
 
     if (newStatus == EventStatus.SENT) {
         // update the event id

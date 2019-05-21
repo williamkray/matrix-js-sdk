@@ -540,7 +540,8 @@ EventTimelineSet.prototype.addEventToTimeline = function(event, timeline,
     timeline.addEvent(event, toStartOfTimeline);
     this._eventIdToTimeline[eventId] = timeline;
 
-    this._aggregateRelations(event);
+    this.setRelationsTarget(event);
+    this.aggregateRelations(event);
 
     const data = {
         timeline: timeline,
@@ -709,19 +710,54 @@ EventTimelineSet.prototype.getRelationsForEvent = function(
 };
 
 /**
+ * Set an event as the target event if any Relations exist for it already
+ *
+ * @param {MatrixEvent} event
+ * The event to check as relation target.
+ */
+EventTimelineSet.prototype.setRelationsTarget = function(event) {
+    if (!this._unstableClientRelationAggregation) {
+        return;
+    }
+
+    const relationsForEvent = this._relations[event.getId()];
+    if (!relationsForEvent) {
+        return;
+    }
+    // don't need it for non m.replace relations for now
+    const relationsWithRelType = relationsForEvent["m.replace"];
+    if (!relationsWithRelType) {
+        return;
+    }
+    // only doing replacements for messages for now (e.g. edits)
+    const relationsWithEventType = relationsWithRelType["m.room.message"];
+
+    if (relationsWithEventType) {
+        relationsWithEventType.setTargetEvent(event);
+    }
+};
+
+/**
  * Add relation events to the relevant relation collection.
  *
  * @param {MatrixEvent} event
  * The new relation event to be aggregated.
  */
-EventTimelineSet.prototype._aggregateRelations = function(event) {
+EventTimelineSet.prototype.aggregateRelations = function(event) {
     if (!this._unstableClientRelationAggregation) {
         return;
     }
 
-    const content = event.getContent();
-    const relation = content && content["m.relates_to"];
-    if (!relation || !relation.rel_type || !relation.event_id) {
+    // If the event is currently encrypted, wait until it has been decrypted.
+    if (event.isBeingDecrypted()) {
+        event.once("Event.decrypted", () => {
+            this.aggregateRelations(event);
+        });
+        return;
+    }
+
+    const relation = event.getRelation();
+    if (!relation) {
         return;
     }
 
@@ -740,6 +776,7 @@ EventTimelineSet.prototype._aggregateRelations = function(event) {
         relationsWithRelType = relationsForEvent[relationType] = {};
     }
     let relationsWithEventType = relationsWithRelType[eventType];
+
     if (!relationsWithEventType) {
         relationsWithEventType = relationsWithRelType[eventType] = new Relations(
             relationType,
@@ -748,6 +785,7 @@ EventTimelineSet.prototype._aggregateRelations = function(event) {
         );
         const relatesToEvent = this.findEventById(relatesToEventId);
         if (relatesToEvent) {
+            relationsWithEventType.setTargetEvent(relatesToEvent);
             relatesToEvent.emit("Event.relationsCreated", relationType, eventType);
         }
     }

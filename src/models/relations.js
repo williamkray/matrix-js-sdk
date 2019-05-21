@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 import EventEmitter from 'events';
+import { EventStatus } from '../../lib/models/event';
 
 /**
  * A container for relation events that supports easy access to common ways of
@@ -43,18 +44,22 @@ export default class Relations extends EventEmitter {
         this._annotationsByKey = {};
         this._annotationsBySender = {};
         this._sortedAnnotationsByKey = [];
+        this._targetEvent = null;
     }
 
     /**
      * Add relation events to this collection.
      *
      * @param {MatrixEvent} event
-     * The new relation event to be aggregated.
+     * The new relation event to be added.
      */
     addEvent(event) {
-        const content = event.getContent();
-        const relation = content && content["m.relates_to"];
-        if (!relation || !relation.rel_type || !relation.event_id) {
+        if (this._relations.has(event)) {
+            return;
+        }
+
+        const relation = event.getRelation();
+        if (!relation) {
             console.error("Event must have relation info");
             return;
         }
@@ -67,16 +72,79 @@ export default class Relations extends EventEmitter {
             return;
         }
 
-        if (this.relationType === "m.annotation") {
-            const key = relation.key;
-            this._aggregateAnnotation(key, event);
+        // If the event is in the process of being sent, listen for cancellation
+        // so we can remove the event from the collection.
+        if (event.isSending()) {
+            event.on("Event.status", this._onEventStatus);
         }
 
         this._relations.add(event);
 
+        if (this.relationType === "m.annotation") {
+            this._addAnnotationToAggregation(event);
+        } else if (this.relationType === "m.replace" && this._targetEvent) {
+            this._targetEvent.makeReplaced(this.getLastReplacement());
+        }
+
         event.on("Event.beforeRedaction", this._onBeforeRedaction);
 
         this.emit("Relations.add", event);
+    }
+
+    /**
+     * Remove relation event from this collection.
+     *
+     * @param {MatrixEvent} event
+     * The relation event to remove.
+     */
+    _removeEvent(event) {
+        if (!this._relations.has(event)) {
+            return;
+        }
+
+        const relation = event.getRelation();
+        if (!relation) {
+            console.error("Event must have relation info");
+            return;
+        }
+
+        const relationType = relation.rel_type;
+        const eventType = event.getType();
+
+        if (this.relationType !== relationType || this.eventType !== eventType) {
+            console.error("Event relation info doesn't match this container");
+            return;
+        }
+
+        this._relations.delete(event);
+
+        if (this.relationType === "m.annotation") {
+            this._removeAnnotationFromAggregation(event);
+        } else if (this.relationType === "m.replace" && this._targetEvent) {
+            this._targetEvent.makeReplaced(this.getLastReplacement());
+        }
+
+        this.emit("Relations.remove", event);
+    }
+
+    /**
+     * Listens for event status changes to remove cancelled events.
+     *
+     * @param {MatrixEvent} event The event whose status has changed
+     * @param {EventStatus} status The new status
+     */
+    _onEventStatus = (event, status) => {
+        if (!event.isSending()) {
+            // Sending is done, so we don't need to listen anymore
+            event.removeListener("Event.status", this._onEventStatus);
+            return;
+        }
+        if (status !== EventStatus.CANCELLED) {
+            return;
+        }
+        // Event was cancelled, remove from the collection
+        event.removeListener("Event.status", this._onEventStatus);
+        this._removeEvent(event);
     }
 
     /**
@@ -93,7 +161,8 @@ export default class Relations extends EventEmitter {
         return [...this._relations];
     }
 
-    _aggregateAnnotation(key, event) {
+    _addAnnotationToAggregation(event) {
+        const { key } = event.getRelation();
         if (!key) {
             return;
         }
@@ -115,10 +184,35 @@ export default class Relations extends EventEmitter {
         const sender = event.getSender();
         let eventsFromSender = this._annotationsBySender[sender];
         if (!eventsFromSender) {
-            eventsFromSender = this._annotationsBySender[sender] = [];
+            eventsFromSender = this._annotationsBySender[sender] = new Set();
         }
-        // Add the new event to the list for this sender
-        eventsFromSender.push(event);
+        // Add the new event to the set for this sender
+        eventsFromSender.add(event);
+    }
+
+    _removeAnnotationFromAggregation(event) {
+        const { key } = event.getRelation();
+        if (!key) {
+            return;
+        }
+
+        const eventsForKey = this._annotationsByKey[key];
+        if (eventsForKey) {
+            eventsForKey.delete(event);
+
+            // Re-sort the [key, events] pairs in descending order of event count
+            this._sortedAnnotationsByKey.sort((a, b) => {
+                const aEvents = a[1];
+                const bEvents = b[1];
+                return bEvents.size - aEvents.size;
+            });
+        }
+
+        const sender = event.getSender();
+        const eventsFromSender = this._annotationsBySender[sender];
+        if (eventsFromSender) {
+            eventsFromSender.delete(event);
+        }
     }
 
     /**
@@ -137,27 +231,13 @@ export default class Relations extends EventEmitter {
             return;
         }
 
+        this._relations.delete(redactedEvent);
+
         if (this.relationType === "m.annotation") {
             // Remove the redacted annotation from aggregation by key
-            const content = redactedEvent.getContent();
-            const relation = content && content["m.relates_to"];
-            if (!relation) {
-                return;
-            }
-
-            const key = relation.key;
-            const eventsForKey = this._annotationsByKey[key];
-            if (!eventsForKey) {
-                return;
-            }
-            eventsForKey.delete(redactedEvent);
-
-            // Re-sort the [key, events] pairs in descending order of event count
-            this._sortedAnnotationsByKey.sort((a, b) => {
-                const aEvents = a[1];
-                const bEvents = b[1];
-                return bEvents.size - aEvents.size;
-            });
+            this._removeAnnotationFromAggregation(redactedEvent);
+        } else if (this.relationType === "m.replace" && this._targetEvent) {
+            this._targetEvent.makeReplaced(this.getLastReplacement());
         }
 
         redactedEvent.removeListener("Event.beforeRedaction", this._onBeforeRedaction);
@@ -195,7 +275,7 @@ export default class Relations extends EventEmitter {
      * This is currently only supported for the annotation relation type.
      *
      * @return {Object}
-     * An object with each relation sender as a key and the matching list of
+     * An object with each relation sender as a key and the matching Set of
      * events for that sender as a value.
      */
     getAnnotationsBySender() {
@@ -205,5 +285,53 @@ export default class Relations extends EventEmitter {
         }
 
         return this._annotationsBySender;
+    }
+
+    /**
+     * Returns the most recent (and allowed) m.replace relation, if any.
+     *
+     * This is currently only supported for the m.replace relation type,
+     * once the target event is known, see `addEvent`.
+     *
+     * @return {MatrixEvent?}
+     */
+    getLastReplacement() {
+        if (this.relationType !== "m.replace") {
+            // Aggregating on last only makes sense for this relation type
+            return null;
+        }
+        if (!this._targetEvent) {
+            // Don't know which replacements to accept yet.
+            // This method shouldn't be called before the original
+            // event is known anyway.
+            return null;
+        }
+        return this.getRelations().reduce((last, event) => {
+            if (event.getSender() !== this._targetEvent.getSender()) {
+                return last;
+            }
+            if (last && last.getTs() > event.getTs()) {
+                return last;
+            }
+            return event;
+        }, null);
+    }
+
+    /*
+     * @param {MatrixEvent} targetEvent the event the relations are related to.
+     */
+    setTargetEvent(event) {
+        if (this._targetEvent) {
+            return;
+        }
+        this._targetEvent = event;
+        if (this.relationType === "m.replace") {
+            const replacement = this.getLastReplacement();
+            // this is the initial update, so only call it if we already have something
+            // to not emit Event.replaced needlessly
+            if (replacement) {
+                this._targetEvent.makeReplaced(replacement);
+            }
+        }
     }
 }
