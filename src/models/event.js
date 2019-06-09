@@ -24,6 +24,7 @@ limitations under the License.
 import Promise from 'bluebird';
 import {EventEmitter} from 'events';
 import utils from '../utils.js';
+import logger from '../../src/logger';
 
 /**
  * Enum for event statuses.
@@ -123,6 +124,7 @@ module.exports.MatrixEvent = function MatrixEvent(
     this.forwardLooking = true;
     this._pushActions = null;
     this._replacingEvent = null;
+    this._locallyRedacted = false;
 
     this._clearEvent = {};
 
@@ -227,6 +229,9 @@ utils.extend(module.exports.MatrixEvent.prototype, {
      * @return {Object} The event content JSON, or an empty object.
      */
     getOriginalContent: function() {
+        if (this._locallyRedacted) {
+            return {};
+        }
         return this._clearEvent.content || this.event.content || {};
     },
 
@@ -238,7 +243,9 @@ utils.extend(module.exports.MatrixEvent.prototype, {
      * @return {Object} The event content JSON, or an empty object.
      */
     getContent: function() {
-        if (this._replacingEvent) {
+        if (this._locallyRedacted) {
+            return {};
+        } else if (this._replacingEvent) {
             return this._replacingEvent.getContent()["m.new_content"] || {};
         } else {
             return this.getOriginalContent();
@@ -395,7 +402,7 @@ utils.extend(module.exports.MatrixEvent.prototype, {
         // new info.
         //
         if (this._decryptionPromise) {
-            console.log(
+            logger.log(
                 `Event ${this.getId()} already being decrypted; queueing a retry`,
             );
             this._retryDecryption = true;
@@ -469,7 +476,7 @@ utils.extend(module.exports.MatrixEvent.prototype, {
                 if (e.name !== "DecryptionError") {
                     // not a decryption error: log the whole exception as an error
                     // (and don't bother with a retry)
-                    console.error(
+                    logger.error(
                         `Error decrypting event (id=${this.getId()}): ${e.stack || e}`,
                     );
                     this._decryptionPromise = null;
@@ -495,7 +502,7 @@ utils.extend(module.exports.MatrixEvent.prototype, {
                 //
                 if (this._retryDecryption) {
                     // decryption error, but we have a retry queued.
-                    console.log(
+                    logger.log(
                         `Got error decrypting event (id=${this.getId()}: ` +
                         `${e}), but retrying`,
                     );
@@ -504,7 +511,7 @@ utils.extend(module.exports.MatrixEvent.prototype, {
 
                 // decryption error, no retries queued. Warn about the error and
                 // set it to m.bad.encrypted.
-                console.warn(
+                logger.warn(
                     `Error decrypting event (id=${this.getId()}): ${e.detailedString}`,
                 );
 
@@ -665,6 +672,27 @@ utils.extend(module.exports.MatrixEvent.prototype, {
         return this.event.unsigned || {};
     },
 
+    unmarkLocallyRedacted: function() {
+        const value = this._locallyRedacted;
+        this._locallyRedacted = false;
+        if (this.event.unsigned) {
+            this.event.unsigned.redacted_because = null;
+        }
+        return value;
+    },
+
+    markLocallyRedacted: function(redactionEvent) {
+        if (this._locallyRedacted) {
+            return;
+        }
+        this.emit("Event.beforeRedaction", this, redactionEvent);
+        this._locallyRedacted = true;
+        if (!this.event.unsigned) {
+            this.event.unsigned = {};
+        }
+        this.event.unsigned.redacted_because = redactionEvent.event;
+    },
+
     /**
      * Update the content of an event in the same way it would be by the server
      * if it were redacted before it was sent to us
@@ -677,6 +705,8 @@ utils.extend(module.exports.MatrixEvent.prototype, {
         if (!redaction_event.event) {
             throw new Error("invalid redaction_event in makeRedacted");
         }
+
+        this._locallyRedacted = false;
 
         this.emit("Event.beforeRedaction", this, redaction_event);
 

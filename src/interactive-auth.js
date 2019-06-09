@@ -22,6 +22,7 @@ import Promise from 'bluebird';
 const url = require("url");
 
 const utils = require("./utils");
+import logger from '../src/logger';
 
 const EMAIL_STAGE_TYPE = "m.login.email.identity";
 const MSISDN_STAGE_TYPE = "m.login.msisdn";
@@ -111,9 +112,12 @@ function InteractiveAuth(opts) {
     this._clientSecret = opts.clientSecret || this._matrixClient.generateClientSecret();
     this._emailSid = opts.emailSid;
     if (this._emailSid === undefined) this._emailSid = null;
+    this._requestingEmailToken = false;
 
     this._chosenFlow = null;
     this._currentStage = null;
+
+    this._polling = false;
 }
 
 InteractiveAuth.prototype = {
@@ -146,8 +150,9 @@ InteractiveAuth.prototype = {
      * completed out-of-band. If so, the attemptAuth promise will
      * be resolved.
      */
-    poll: function() {
+    poll: async function() {
         if (!this._data.session) return;
+        if (this._polling) return;
 
         let authDict = {};
         if (this._currentStage == EMAIL_STAGE_TYPE) {
@@ -168,7 +173,12 @@ InteractiveAuth.prototype = {
             }
         }
 
-        this.submitAuthDict(authDict, true);
+        this._polling = true;
+        try {
+            await this.submitAuthDict(authDict, true);
+        } finally {
+            this._polling = false;
+        }
     },
 
     /**
@@ -220,7 +230,7 @@ InteractiveAuth.prototype = {
      *    in the attemptAuth promise being rejected. This can be set to true
      *    for requests that just poll to see if auth has been completed elsewhere.
      */
-    submitAuthDict: function(authData, background) {
+    submitAuthDict: async function(authData, background) {
         if (!this._resolveFunc) {
             throw new Error("submitAuthDict() called before attemptAuth()");
         }
@@ -231,7 +241,7 @@ InteractiveAuth.prototype = {
         };
         utils.extend(auth, authData);
 
-        this._doRequest(auth, background);
+        await this._doRequest(auth, background);
     },
 
     /**
@@ -283,7 +293,7 @@ InteractiveAuth.prototype = {
                     // We ignore all failures here (even non-UI auth related ones)
                     // since we don't want to suddenly fail if the internet connection
                     // had a blip whilst we were polling
-                    console.log(
+                    logger.log(
                         "Background poll request failed doing UI auth: ignoring",
                         error,
                     );
@@ -304,12 +314,14 @@ InteractiveAuth.prototype = {
 
             if (
                 !this._emailSid &&
+                !this._requestingEmailToken &&
                 this._chosenFlow.stages.includes('m.login.email.identity')
             ) {
                 // If we've picked a flow with email auth, we send the email
                 // now because we want the request to fail as soon as possible
                 // if the email address is not valid (ie. already taken or not
                 // registered, depending on what the operation is).
+                this._requestingEmailToken = true;
                 try {
                     const requestTokenResult = await this._requestEmailTokenCallback(
                         this._inputs.emailAddress,
@@ -332,6 +344,8 @@ InteractiveAuth.prototype = {
                     // the failure up as the user can't complete auth if we can't
                     // send the email, foe whatever reason.
                     this._rejectFunc(e);
+                } finally {
+                    this._requestingEmailToken = false;
                 }
             }
         }
@@ -383,9 +397,9 @@ InteractiveAuth.prototype = {
         if (this._chosenFlow === null) {
             this._chosenFlow = this._chooseFlow();
         }
-        console.log("Active flow => %s", JSON.stringify(this._chosenFlow));
+        logger.log("Active flow => %s", JSON.stringify(this._chosenFlow));
         const nextStage = this._firstUncompletedStage(this._chosenFlow);
-        console.log("Next stage: %s", nextStage);
+        logger.log("Next stage: %s", nextStage);
         return nextStage;
     },
 
