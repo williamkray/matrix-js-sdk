@@ -1,6 +1,7 @@
 /*
 Copyright 2015, 2016 OpenMarket Ltd
 Copyright 2018, 2019 New Vector Ltd
+Copyright 2019 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,7 +39,7 @@ import ReEmitter from '../ReEmitter';
 // room versions which are considered okay for people to run without being asked
 // to upgrade (ie: "stable"). Eventually, we should remove these when all homeservers
 // return an m.room_versions capability.
-const KNOWN_SAFE_ROOM_VERSION = '1';
+const KNOWN_SAFE_ROOM_VERSION = '4';
 const SAFE_ROOM_VERSIONS = ['1', '2', '3', '4'];
 
 function synthesizeReceipt(userId, event, receiptType) {
@@ -346,11 +347,28 @@ Room.prototype.userMayUpgradeRoom = function(userId) {
 Room.prototype.getPendingEvents = function() {
     if (this._opts.pendingEventOrdering !== "detached") {
         throw new Error(
-            "Cannot call getPendingEventList with pendingEventOrdering == " +
+            "Cannot call getPendingEvents with pendingEventOrdering == " +
                 this._opts.pendingEventOrdering);
     }
 
     return this._pendingEventList;
+};
+
+/**
+ * Check whether the pending event list contains a given event by ID.
+ *
+ * @param {string} eventId The event ID to check for.
+ * @return {boolean}
+ * @throws If <code>opts.pendingEventOrdering</code> was not 'detached'
+ */
+Room.prototype.hasPendingEvent = function(eventId) {
+    if (this._opts.pendingEventOrdering !== "detached") {
+        throw new Error(
+            "Cannot call hasPendingEvent with pendingEventOrdering == " +
+                this._opts.pendingEventOrdering);
+    }
+
+    return this._pendingEventList.some(event => event.getId() === eventId);
 };
 
 /**
@@ -763,7 +781,7 @@ Room.prototype.getBlacklistUnverifiedDevices = function() {
  * @param {string} resizeMethod The thumbnail resize method to use, either
  * "crop" or "scale".
  * @param {boolean} allowDefault True to allow an identicon for this room if an
- * avatar URL wasn't explicitly set. Default: true.
+ * avatar URL wasn't explicitly set. Default: true. (Deprecated)
  * @return {?string} the avatar URL or null.
  */
 Room.prototype.getAvatarUrl = function(baseUrl, width, height, resizeMethod,
@@ -1402,18 +1420,23 @@ Room.prototype.addLiveEvents = function(events, duplicateStrategy) {
     }
 
     for (i = 0; i < events.length; i++) {
-        if (events[i].getType() === "m.typing") {
-            this.currentState.setTypingEvent(events[i]);
-        } else if (events[i].getType() === "m.receipt") {
-            this.addReceipt(events[i]);
-        }
-        // N.B. account_data is added directly by /sync to avoid
-        // having to maintain an event.isAccountData() here
-        else {
-            // TODO: We should have a filter to say "only add state event
-            // types X Y Z to the timeline".
-            this._addLiveEvent(events[i], duplicateStrategy);
-        }
+        // TODO: We should have a filter to say "only add state event
+        // types X Y Z to the timeline".
+        this._addLiveEvent(events[i], duplicateStrategy);
+    }
+};
+
+/**
+ * Adds/handles ephemeral events such as typing notifications and read receipts.
+ * @param {MatrixEvent[]} events A list of events to process
+ */
+Room.prototype.addEphemeralEvents = function(events) {
+    for (const event of events) {
+        if (event.getType() === 'm.typing') {
+            this.currentState.setTypingEvent(event);
+        } else if (event.getType() === 'm.receipt') {
+            this.addReceipt(event);
+        } // else ignore - life is too short for us to care about these events
     }
 };
 

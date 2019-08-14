@@ -1,5 +1,6 @@
 /*
 Copyright 2015, 2016 OpenMarket Ltd
+Copyright 2019 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -46,9 +47,14 @@ module.exports.PREFIX_R0 = "/_matrix/client/r0";
 module.exports.PREFIX_UNSTABLE = "/_matrix/client/unstable";
 
 /**
- * URI path for the identity API
+ * URI path for v1 of the the identity API
  */
 module.exports.PREFIX_IDENTITY_V1 = "/_matrix/identity/api/v1";
+
+/**
+ * URI path for the v2 identity API
+ */
+module.exports.PREFIX_IDENTITY_V2 = "/_matrix/identity/v2";
 
 /**
  * URI path for the media repo API
@@ -90,6 +96,13 @@ module.exports.MatrixHttpApi = function MatrixHttpApi(event_emitter, opts) {
 };
 
 module.exports.MatrixHttpApi.prototype = {
+    /**
+     * Sets the baase URL for the identity server
+     * @param {string} url The new base url
+     */
+    setIdBaseUrl: function(url) {
+        this.opts.idBaseUrl = url;
+    },
 
     /**
      * Get the content repository url with query parameters.
@@ -102,7 +115,7 @@ module.exports.MatrixHttpApi.prototype = {
         };
         return {
             base: this.opts.baseUrl,
-            path: "/_matrix/media/v1/upload",
+            path: "/_matrix/media/r0/upload",
             params: params,
         };
     },
@@ -291,7 +304,7 @@ module.exports.MatrixHttpApi.prototype = {
                     });
                 }
             });
-            let url = this.opts.baseUrl + "/_matrix/media/v1/upload";
+            let url = this.opts.baseUrl + "/_matrix/media/r0/upload";
 
             const queryArgs = [];
 
@@ -327,7 +340,7 @@ module.exports.MatrixHttpApi.prototype = {
 
             promise = this.authedRequest(
                 opts.callback, "POST", "/upload", queryParams, body, {
-                    prefix: "/_matrix/media/v1",
+                    prefix: "/_matrix/media/r0",
                     headers: {"Content-Type": contentType},
                     json: false,
                     bodyParser: bodyParser,
@@ -368,7 +381,18 @@ module.exports.MatrixHttpApi.prototype = {
         return this.uploads;
     },
 
-    idServerRequest: function(callback, method, path, params, prefix) {
+    idServerRequest: function(
+        callback,
+        method,
+        path,
+        params,
+        prefix,
+        accessToken,
+    ) {
+        if (!this.opts.idBaseUrl) {
+            throw new Error("No Identity Server base URL set");
+        }
+
         const fullUri = this.opts.idBaseUrl + prefix + path;
 
         if (callback !== undefined && !utils.isFunction(callback)) {
@@ -383,11 +407,19 @@ module.exports.MatrixHttpApi.prototype = {
             withCredentials: false,
             json: false,
             _matrix_opts: this.opts,
+            headers: {},
         };
         if (method == 'GET') {
             opts.qs = params;
-        } else {
+        } else if (typeof params === "object") {
             opts.form = params;
+        } else if (typeof params === "string") {
+            // Assume the caller has serialised the body to JSON
+            opts.body = params;
+            opts.headers['Content-Type'] = "application/json";
+        }
+        if (accessToken) {
+            opts.headers['Authorization'] = `Bearer ${accessToken}`;
         }
 
         const defer = Promise.defer();
@@ -470,7 +502,7 @@ module.exports.MatrixHttpApi.prototype = {
         const self = this;
         requestPromise.catch(function(err) {
             if (err.errcode == 'M_UNKNOWN_TOKEN') {
-                self.event_emitter.emit("Session.logged_out");
+                self.event_emitter.emit("Session.logged_out", err);
             } else if (err.errcode == 'M_CONSENT_NOT_GIVEN') {
                 self.event_emitter.emit(
                     "no_consent",
@@ -522,76 +554,6 @@ module.exports.MatrixHttpApi.prototype = {
 
         return this.requestOtherUrl(
             callback, method, fullUri, queryParams, data, opts,
-        );
-    },
-
-    /**
-     * Perform an authorised request to the homeserver with a specific path
-     * prefix which overrides the default for this call only. Useful for hitting
-     * different Matrix Client-Server versions.
-     * @param {Function} callback Optional. The callback to invoke on
-     * success/failure. See the promise return values for more information.
-     * @param {string} method The HTTP method e.g. "GET".
-     * @param {string} path The HTTP path <b>after</b> the supplied prefix e.g.
-     * "/createRoom".
-     * @param {Object} queryParams A dict of query params (these will NOT be
-     * urlencoded).
-     * @param {Object} data The HTTP JSON body.
-     * @param {string} prefix The full prefix to use e.g.
-     * "/_matrix/client/v2_alpha".
-     * @param {Number=} localTimeoutMs The maximum amount of time to wait before
-     * timing out the request. If not specified, there is no timeout.
-     * @return {module:client.Promise} Resolves to <code>{data: {Object},
-     * headers: {Object}, code: {Number}}</code>.
-     * If <code>onlyData</code> is set, this will resolve to the <code>data</code>
-     * object only.
-     * @return {module:http-api.MatrixError} Rejects with an error if a problem
-     * occurred. This includes network problems and Matrix-specific error JSON.
-     *
-     * @deprecated prefer authedRequest with opts.prefix
-     */
-    authedRequestWithPrefix: function(callback, method, path, queryParams, data,
-                                      prefix, localTimeoutMs) {
-        return this.authedRequest(
-            callback, method, path, queryParams, data, {
-                localTimeoutMs: localTimeoutMs,
-                prefix: prefix,
-            },
-        );
-    },
-
-    /**
-     * Perform a request to the homeserver without any credentials but with a
-     * specific path prefix which overrides the default for this call only.
-     * Useful for hitting different Matrix Client-Server versions.
-     * @param {Function} callback Optional. The callback to invoke on
-     * success/failure. See the promise return values for more information.
-     * @param {string} method The HTTP method e.g. "GET".
-     * @param {string} path The HTTP path <b>after</b> the supplied prefix e.g.
-     * "/createRoom".
-     * @param {Object} queryParams A dict of query params (these will NOT be
-     * urlencoded).
-     * @param {Object} data The HTTP JSON body.
-     * @param {string} prefix The full prefix to use e.g.
-     * "/_matrix/client/v2_alpha".
-     * @param {Number=} localTimeoutMs The maximum amount of time to wait before
-     * timing out the request. If not specified, there is no timeout.
-     * @return {module:client.Promise} Resolves to <code>{data: {Object},
-     * headers: {Object}, code: {Number}}</code>.
-     * If <code>onlyData</code> is set, this will resolve to the <code>data</code>
-     * object only.
-     * @return {module:http-api.MatrixError} Rejects with an error if a problem
-     * occurred. This includes network problems and Matrix-specific error JSON.
-     *
-     * @deprecated prefer request with opts.prefix
-     */
-    requestWithPrefix: function(callback, method, path, queryParams, data, prefix,
-                                localTimeoutMs) {
-        return this.request(
-            callback, method, path, queryParams, data, {
-                localTimeoutMs: localTimeoutMs,
-                prefix: prefix,
-            },
         );
     },
 

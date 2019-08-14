@@ -1,6 +1,8 @@
 /*
 Copyright 2015, 2016 OpenMarket Ltd
 Copyright 2017 Vector Creations Ltd
+Copyright 2019 The Matrix.org Foundation C.I.C.
+Copyright 2019 Michael Telatynski <7t3chguy@gmail.com>
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,8 +25,23 @@ limitations under the License.
  * @module base-apis
  */
 
+import { SERVICE_TYPES } from './service-types';
+import logger from './logger';
+
 const httpApi = require("./http-api");
 const utils = require("./utils");
+const PushProcessor = require("./pushprocessor");
+
+function termsUrlForService(serviceType, baseUrl) {
+    switch (serviceType) {
+        case SERVICE_TYPES.IS:
+            return baseUrl + httpApi.PREFIX_IDENTITY_V2 + '/terms';
+        case SERVICE_TYPES.IM:
+            return baseUrl + '/_matrix/integrations/v1/terms';
+        default:
+            throw new Error('Unsupported service type');
+    }
+}
 
 /**
  * Low-level wrappers for the Matrix APIs
@@ -98,6 +115,15 @@ MatrixBaseApis.prototype.getIdentityServerUrl = function(stripProto=false) {
         return this.idBaseUrl.split("://")[1];
     }
     return this.idBaseUrl;
+};
+
+/**
+ * Set the Identity Server URL of this client
+ * @param {string} url New Identity Server URL
+ */
+MatrixBaseApis.prototype.setIdentityServerUrl = function(url) {
+    this.idBaseUrl = utils.ensureNoTrailingSlash(url);
+    this._http.setIdBaseUrl(this._idBaseUrl);
 };
 
 /**
@@ -391,9 +417,8 @@ MatrixBaseApis.prototype.deactivateAccount = function(auth, erase) {
         body.erase = erase;
     }
 
-    return this._http.authedRequestWithPrefix(
+    return this._http.authedRequest(
         undefined, "POST", '/account/deactivate', undefined, body,
-        httpApi.PREFIX_R0,
     );
 };
 
@@ -437,6 +462,37 @@ MatrixBaseApis.prototype.createRoom = function(options, callback) {
     return this._http.authedRequest(
         callback, "POST", "/createRoom", undefined, options,
     );
+};
+/**
+ * Fetches relations for a given event
+ * @param {string} roomId the room of the event
+ * @param {string} eventId the id of the event
+ * @param {string} relationType the rel_type of the relations requested
+ * @param {string} eventType the event type of the relations requested
+ * @param {Object} opts options with optional values for the request.
+ * @param {Object} opts.from the pagination token returned from a previous request as `next_batch` to return following relations.
+ * @return {Object} the response, with chunk and next_batch.
+ */
+MatrixBaseApis.prototype.fetchRelations =
+    async function(roomId, eventId, relationType, eventType, opts) {
+    const queryParams = {};
+    if (opts.from) {
+        queryParams.from = opts.from;
+    }
+    const queryString = utils.encodeParams(queryParams);
+    const path = utils.encodeUri(
+        "/rooms/$roomId/relations/$eventId/$relationType/$eventType?" + queryString, {
+            $roomId: roomId,
+            $eventId: eventId,
+            $relationType: relationType,
+            $eventType: eventType,
+        });
+    const response = await this._http.authedRequest(
+        undefined, "GET", path, null, null, {
+            prefix: httpApi.PREFIX_UNSTABLE,
+        },
+    );
+    return response;
 };
 
 /**
@@ -1300,9 +1356,7 @@ MatrixBaseApis.prototype.deleteThreePid = function(medium, address) {
         'medium': medium,
         'address': address,
     };
-    return this._http.authedRequestWithPrefix(
-        undefined, "POST", path, null, data, httpApi.PREFIX_UNSTABLE,
-    );
+    return this._http.authedRequest(undefined, "POST", path, null, data);
 };
 
 /**
@@ -1335,10 +1389,8 @@ MatrixBaseApis.prototype.setPassword = function(authDict, newPassword, callback)
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getDevices = function() {
-    const path = "/devices";
-    return this._http.authedRequestWithPrefix(
-        undefined, "GET", path, undefined, undefined,
-        httpApi.PREFIX_UNSTABLE,
+    return this._http.authedRequest(
+        undefined, 'GET', "/devices", undefined, undefined,
     );
 };
 
@@ -1355,11 +1407,7 @@ MatrixBaseApis.prototype.setDeviceDetails = function(device_id, body) {
         $device_id: device_id,
     });
 
-
-    return this._http.authedRequestWithPrefix(
-        undefined, "PUT", path, undefined, body,
-        httpApi.PREFIX_UNSTABLE,
-    );
+    return this._http.authedRequest(undefined, "PUT", path, undefined, body);
 };
 
 /**
@@ -1381,10 +1429,7 @@ MatrixBaseApis.prototype.deleteDevice = function(device_id, auth) {
         body.auth = auth;
     }
 
-    return this._http.authedRequestWithPrefix(
-        undefined, "DELETE", path, undefined, body,
-        httpApi.PREFIX_UNSTABLE,
-    );
+    return this._http.authedRequest(undefined, "DELETE", path, undefined, body);
 };
 
 /**
@@ -1402,10 +1447,8 @@ MatrixBaseApis.prototype.deleteMultipleDevices = function(devices, auth) {
         body.auth = auth;
     }
 
-    return this._http.authedRequestWithPrefix(
-        undefined, "POST", "/delete_devices", undefined, body,
-        httpApi.PREFIX_UNSTABLE,
-    );
+    const path = "/delete_devices";
+    return this._http.authedRequest(undefined, "POST", path, undefined, body);
 };
 
 
@@ -1447,7 +1490,9 @@ MatrixBaseApis.prototype.setPusher = function(pusher, callback) {
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getPushRules = function(callback) {
-    return this._http.authedRequest(callback, "GET", "/pushrules/");
+    return this._http.authedRequest(callback, "GET", "/pushrules/").then(rules => {
+        return PushProcessor.rewriteDefaultRules(rules);
+    });
 };
 
 /**
@@ -1581,9 +1626,7 @@ MatrixBaseApis.prototype.uploadKeysRequest = function(content, opts, callback) {
     } else {
         path = "/keys/upload";
     }
-    return this._http.authedRequestWithPrefix(
-        callback, "POST", path, undefined, content, httpApi.PREFIX_UNSTABLE,
-    );
+    return this._http.authedRequest(callback, "POST", path, undefined, content);
 };
 
 /**
@@ -1618,10 +1661,7 @@ MatrixBaseApis.prototype.downloadKeysForUsers = function(userIds, opts) {
         content.device_keys[u] = {};
     });
 
-    return this._http.authedRequestWithPrefix(
-        undefined, "POST", "/keys/query", undefined, content,
-        httpApi.PREFIX_UNSTABLE,
-    );
+    return this._http.authedRequest(undefined, "POST", "/keys/query", undefined, content);
 };
 
 /**
@@ -1649,10 +1689,8 @@ MatrixBaseApis.prototype.claimOneTimeKeys = function(devices, key_algorithm) {
         query[deviceId] = key_algorithm;
     }
     const content = {one_time_keys: queries};
-    return this._http.authedRequestWithPrefix(
-        undefined, "POST", "/keys/claim", undefined, content,
-        httpApi.PREFIX_UNSTABLE,
-    );
+    const path = "/keys/claim";
+    return this._http.authedRequest(undefined, "POST", path, undefined, content);
 };
 
 /**
@@ -1671,10 +1709,8 @@ MatrixBaseApis.prototype.getKeyChanges = function(oldToken, newToken) {
         to: newToken,
     };
 
-    return this._http.authedRequestWithPrefix(
-        undefined, "GET", "/keys/changes", qps, undefined,
-        httpApi.PREFIX_UNSTABLE,
-    );
+    const path = "/keys/changes";
+    return this._http.authedRequest(undefined, "GET", path, qps, undefined);
 };
 
 
@@ -1682,9 +1718,34 @@ MatrixBaseApis.prototype.getKeyChanges = function(oldToken, newToken) {
 // ==========================
 
 /**
+ * Register with an Identity Server using the OpenID token from the user's
+ * Homeserver, which can be retrieved via
+ * {@link module:client~MatrixClient#getOpenIdToken}.
+ *
+ * Note that the `/account/register` endpoint (as well as IS authentication in
+ * general) was added as part of the v2 API version.
+ *
+ * @param {object} hsOpenIdToken
+ * @return {module:client.Promise} Resolves: with object containing an Identity
+ * Server access token.
+ * @return {module:http-api.MatrixError} Rejects: with an error response.
+ */
+MatrixBaseApis.prototype.registerWithIdentityServer = function(hsOpenIdToken) {
+    if (!this.idBaseUrl) {
+        throw new Error("No Identity Server base URL set");
+    }
+
+    const uri = this.idBaseUrl + httpApi.PREFIX_IDENTITY_V2 + "/account/register";
+    return this._http.requestOtherUrl(
+        undefined, "POST", uri,
+        null, hsOpenIdToken,
+    );
+};
+
+/**
  * Requests an email verification token directly from an Identity Server.
  *
- * Note that the Home Server offers APIs to proxy this API for specific
+ * Note that the Homeserver offers APIs to proxy this API for specific
  * situations, allowing for better feedback to the user.
  *
  * @param {string} email The email address to request a token for
@@ -1697,22 +1758,51 @@ MatrixBaseApis.prototype.getKeyChanges = function(oldToken, newToken) {
  * @param {string} nextLink Optional If specified, the client will be redirected
  *                 to this link after validation.
  * @param {module:client.callback} callback Optional.
+ * @param {string} identityAccessToken The `access_token` field of the Identity
+ * Server `/account/register` response (see {@link registerWithIdentityServer}).
+ *
  * @return {module:client.Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
- * @throws Error if No ID server is set
+ * @throws Error if no Identity Server is set
  */
-MatrixBaseApis.prototype.requestEmailToken = function(email, clientSecret,
-                                                    sendAttempt, nextLink, callback) {
+MatrixBaseApis.prototype.requestEmailToken = async function(
+    email,
+    clientSecret,
+    sendAttempt,
+    nextLink,
+    callback,
+    identityAccessToken,
+) {
     const params = {
         client_secret: clientSecret,
         email: email,
         send_attempt: sendAttempt,
         next_link: nextLink,
     };
-    return this._http.idServerRequest(
-        callback, "POST", "/validate/email/requestToken",
-        params, httpApi.PREFIX_IDENTITY_V1,
-    );
+
+    try {
+        const response = await this._http.idServerRequest(
+            undefined, "POST", "/validate/email/requestToken",
+            JSON.stringify(params), httpApi.PREFIX_IDENTITY_V2,
+            identityAccessToken,
+        );
+        // TODO: Fold callback into above call once v1 path below is removed
+        if (callback) callback(null, response);
+        return response;
+    } catch (err) {
+        if (err.cors === "rejected" || err.httpStatus === 404) {
+            // Fall back to deprecated v1 API for now
+            // TODO: Remove this path once v2 is only supported version
+            // See https://github.com/vector-im/riot-web/issues/10443
+            logger.warn("IS doesn't support v2, falling back to deprecated v1");
+            return await this._http.idServerRequest(
+                callback, "POST", "/validate/email/requestToken",
+                params, httpApi.PREFIX_IDENTITY_V1,
+            );
+        }
+        if (callback) callback(err);
+        throw err;
+    }
 };
 
 /**
@@ -1726,46 +1816,155 @@ MatrixBaseApis.prototype.requestEmailToken = function(email, clientSecret,
  * @param {string} sid The sid given in the response to requestToken
  * @param {string} clientSecret A secret binary string generated by the client.
  *                 This must be the same value submitted in the requestToken call.
- * @param {string} token The token, as enetered by the user.
+ * @param {string} msisdnToken The MSISDN token, as enetered by the user.
+ * @param {string} identityAccessToken The `access_token` field of the Identity
+ * Server `/account/register` response (see {@link registerWithIdentityServer}).
  *
  * @return {module:client.Promise} Resolves: Object, currently with no parameters.
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  * @throws Error if No ID server is set
  */
-MatrixBaseApis.prototype.submitMsisdnToken = function(sid, clientSecret, token) {
+MatrixBaseApis.prototype.submitMsisdnToken = async function(
+    sid,
+    clientSecret,
+    msisdnToken,
+    identityAccessToken,
+) {
     const params = {
         sid: sid,
         client_secret: clientSecret,
-        token: token,
+        token: msisdnToken,
     };
-    return this._http.idServerRequest(
-        undefined, "POST", "/validate/msisdn/submitToken",
-        params, httpApi.PREFIX_IDENTITY_V1,
-    );
+
+    try {
+        return await this._http.idServerRequest(
+            undefined, "POST", "/validate/msisdn/submitToken",
+            JSON.stringify(params), httpApi.PREFIX_IDENTITY_V2,
+            identityAccessToken,
+        );
+    } catch (err) {
+        if (err.cors === "rejected" || err.httpStatus === 404) {
+            // Fall back to deprecated v1 API for now
+            // TODO: Remove this path once v2 is only supported version
+            // See https://github.com/vector-im/riot-web/issues/10443
+            logger.warn("IS doesn't support v2, falling back to deprecated v1");
+            return await this._http.idServerRequest(
+                undefined, "POST", "/validate/msisdn/submitToken",
+                params, httpApi.PREFIX_IDENTITY_V1,
+            );
+        }
+        throw err;
+    }
 };
 
 /**
  * Looks up the public Matrix ID mapping for a given 3rd party
  * identifier from the Identity Server
+ *
  * @param {string} medium The medium of the threepid, eg. 'email'
  * @param {string} address The textual address of the threepid
  * @param {module:client.callback} callback Optional.
+ * @param {string} identityAccessToken The `access_token` field of the Identity
+ * Server `/account/register` response (see {@link registerWithIdentityServer}).
+ *
  * @return {module:client.Promise} Resolves: A threepid mapping
  *                                 object or the empty object if no mapping
  *                                 exists
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
-MatrixBaseApis.prototype.lookupThreePid = function(medium, address, callback) {
+MatrixBaseApis.prototype.lookupThreePid = async function(
+    medium,
+    address,
+    callback,
+    identityAccessToken,
+) {
     const params = {
         medium: medium,
         address: address,
     };
-    return this._http.idServerRequest(
-        callback, "GET", "/lookup",
-        params, httpApi.PREFIX_IDENTITY_V1,
-    );
+
+    try {
+        const response = await this._http.idServerRequest(
+            undefined, "GET", "/lookup",
+            params, httpApi.PREFIX_IDENTITY_V2, identityAccessToken,
+        );
+        // TODO: Fold callback into above call once v1 path below is removed
+        if (callback) callback(null, response);
+        return response;
+    } catch (err) {
+        if (err.cors === "rejected" || err.httpStatus === 404) {
+            // Fall back to deprecated v1 API for now
+            // TODO: Remove this path once v2 is only supported version
+            // See https://github.com/vector-im/riot-web/issues/10443
+            logger.warn("IS doesn't support v2, falling back to deprecated v1");
+            return await this._http.idServerRequest(
+                callback, "GET", "/lookup",
+                params, httpApi.PREFIX_IDENTITY_V1,
+            );
+        }
+        if (callback) callback(err);
+        throw err;
+    }
 };
 
+/**
+ * Looks up the public Matrix ID mappings for multiple 3PIDs.
+ *
+ * @param {Array.<Array.<string>>} query Array of arrays containing
+ * [medium, address]
+ * @param {string} identityAccessToken The `access_token` field of the Identity
+ * Server `/account/register` response (see {@link registerWithIdentityServer}).
+ *
+ * @return {module:client.Promise} Resolves: Lookup results from IS.
+ * @return {module:http-api.MatrixError} Rejects: with an error response.
+ */
+MatrixBaseApis.prototype.bulkLookupThreePids = async function(
+    query,
+    identityAccessToken,
+) {
+    const params = {
+        threepids: query,
+    };
+
+    try {
+        return await this._http.idServerRequest(
+            undefined, "POST", "/bulk_lookup", JSON.stringify(params),
+            httpApi.PREFIX_IDENTITY_V2, identityAccessToken,
+        );
+    } catch (err) {
+        if (err.cors === "rejected" || err.httpStatus === 404) {
+            // Fall back to deprecated v1 API for now
+            // TODO: Remove this path once v2 is only supported version
+            // See https://github.com/vector-im/riot-web/issues/10443
+            logger.warn("IS doesn't support v2, falling back to deprecated v1");
+            return await this._http.idServerRequest(
+                undefined, "POST", "/bulk_lookup", JSON.stringify(params),
+                httpApi.PREFIX_IDENTITY_V1, identityAccessToken,
+            );
+        }
+        throw err;
+    }
+};
+
+/**
+ * Get account info from the Identity Server. This is useful as a neutral check
+ * to verify that other APIs are likely to approve access by testing that the
+ * token is valid, terms have been agreed, etc.
+ *
+ * @param {string} identityAccessToken The `access_token` field of the Identity
+ * Server `/account/register` response (see {@link registerWithIdentityServer}).
+ *
+ * @return {module:client.Promise} Resolves: an object with account info.
+ * @return {module:http-api.MatrixError} Rejects: with an error response.
+ */
+MatrixBaseApis.prototype.getIdentityAccount = function(
+    identityAccessToken,
+) {
+    return this._http.idServerRequest(
+        undefined, "GET", "/account",
+        undefined, httpApi.PREFIX_IDENTITY_V2, identityAccessToken,
+    );
+};
 
 // Direct-to-device messaging
 // ==========================
@@ -1792,10 +1991,7 @@ MatrixBaseApis.prototype.sendToDevice = function(
         messages: contentMap,
     };
 
-    return this._http.authedRequestWithPrefix(
-        undefined, "PUT", path, undefined, body,
-        httpApi.PREFIX_UNSTABLE,
-    );
+    return this._http.authedRequest(undefined, "PUT", path, undefined, body);
 };
 
 // Third party Lookup API
@@ -1807,9 +2003,8 @@ MatrixBaseApis.prototype.sendToDevice = function(
  * @return {module:client.Promise} Resolves to the result object
  */
 MatrixBaseApis.prototype.getThirdpartyProtocols = function() {
-    return this._http.authedRequestWithPrefix(
+    return this._http.authedRequest(
         undefined, "GET", "/thirdparty/protocols", undefined, undefined,
-        httpApi.PREFIX_UNSTABLE,
     ).then((response) => {
         // sanity check
         if (!response || typeof(response) !== 'object') {
@@ -1834,10 +2029,7 @@ MatrixBaseApis.prototype.getThirdpartyLocation = function(protocol, params) {
         $protocol: protocol,
     });
 
-    return this._http.authedRequestWithPrefix(
-        undefined, "GET", path, params, undefined,
-        httpApi.PREFIX_UNSTABLE,
-    );
+    return this._http.authedRequest(undefined, "GET", path, params, undefined);
 };
 
 /**
@@ -1853,10 +2045,43 @@ MatrixBaseApis.prototype.getThirdpartyUser = function(protocol, params) {
         $protocol: protocol,
     });
 
-    return this._http.authedRequestWithPrefix(
-        undefined, "GET", path, params, undefined,
-        httpApi.PREFIX_UNSTABLE,
+    return this._http.authedRequest(undefined, "GET", path, params, undefined);
+};
+
+MatrixBaseApis.prototype.getTerms = function(serviceType, baseUrl) {
+    const url = termsUrlForService(serviceType, baseUrl);
+    return this._http.requestOtherUrl(
+        undefined, 'GET', url,
     );
+};
+
+MatrixBaseApis.prototype.agreeToTerms = function(
+    serviceType, baseUrl, accessToken, termsUrls,
+) {
+    const url = termsUrlForService(serviceType, baseUrl);
+    const headers = {
+        Authorization: "Bearer " + accessToken,
+    };
+    return this._http.requestOtherUrl(
+        undefined, 'POST', url, null, { user_accepts: termsUrls }, { headers },
+    );
+};
+
+/**
+ * Reports an event as inappropriate to the server, which may then notify the appropriate people.
+ * @param {string} roomId The room in which the event being reported is located.
+ * @param {string} eventId The event to report.
+ * @param {number} score The score to rate this content as where -100 is most offensive and 0 is inoffensive.
+ * @param {string} reason The reason the content is being reported. May be blank.
+ * @returns {module:client.Promise} Resolves to an empty object if successful
+ */
+MatrixBaseApis.prototype.reportEvent = function(roomId, eventId, score, reason) {
+    const path = utils.encodeUri("/rooms/$roomId/report/$eventId", {
+        $roomId: roomId,
+        $eventId: eventId,
+    });
+
+    return this._http.authedRequest(undefined, "POST", path, null, {score, reason});
 };
 
 /**

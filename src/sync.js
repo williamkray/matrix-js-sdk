@@ -32,6 +32,7 @@ const Group = require('./models/group');
 const utils = require("./utils");
 const Filter = require("./filter");
 const EventTimeline = require("./models/event-timeline");
+const PushProcessor = require("./pushprocessor");
 import logger from '../src/logger';
 
 import {InvalidStoreError} from './errors';
@@ -1030,8 +1031,9 @@ SyncApi.prototype._processSyncResponse = async function(
                 // honour push rules that were previously cached. Base rules
                 // will be updated when we recieve push rules via getPushRules
                 // (see SyncApi.prototype.sync) before syncing over the network.
-                if (accountDataEvent.getType() == 'm.push_rules') {
-                    client.pushRules = accountDataEvent.getContent();
+                if (accountDataEvent.getType() === 'm.push_rules') {
+                    const rules = accountDataEvent.getContent();
+                    client.pushRules = PushProcessor.rewriteDefaultRules(rules);
                 }
                 client.emit("accountData", accountDataEvent);
                 return accountDataEvent;
@@ -1245,10 +1247,8 @@ SyncApi.prototype._processSyncResponse = async function(
             room.setSummary(joinObj.summary);
         }
 
-        // XXX: should we be adding ephemeralEvents to the timeline?
-        // It feels like that for symmetry with room.addAccountData()
-        // there should be a room.addEphemeralEvents() or similar.
-        room.addLiveEvents(ephemeralEvents);
+        // we deliberately don't add ephemeral events to the timeline
+        room.addEphemeralEvents(ephemeralEvents);
 
         // we deliberately don't add accountData to the timeline
         room.addAccountData(accountDataEvents);
