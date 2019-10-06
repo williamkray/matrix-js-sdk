@@ -108,6 +108,15 @@ function keyFromRecoverySession(session, decryptionKey) {
  *
  * @param {string} opts.userId The user ID for this user.
  *
+ * @param {IdentityServerProvider} [opts.identityServer]
+ * Optional. A provider object with one function `getAccessToken`, which is a
+ * callback that returns a Promise<String> of an identity access token to supply
+ * with identity requests. If the object is unset, no access token will be
+ * supplied.
+ * See also https://github.com/vector-im/riot-web/issues/10615 which seeks to
+ * replace the previous approach of manual access tokens params with this
+ * callback throughout the SDK.
+ *
  * @param {Object=} opts.store
  *    The data store used for sync data from the homeserver. If not specified,
  *    this client will not store any HTTP responses. The `createClient` helper
@@ -159,6 +168,13 @@ function keyFromRecoverySession(session, decryptionKey) {
  * that the application can handle.  Each element should be an item from {@link
  * module:crypto~verificationMethods verificationMethods}, or a class that
  * implements the {$link module:crypto/verification/Base verifier interface}.
+ *
+ * @param {boolean} [opts.forceTURN]
+ * Optional. Whether relaying calls through a TURN server should be forced.
+ *
+ * @param {boolean} [opts.fallbackICEServerAllowed]
+ * Optional. Whether to allow a fallback ICE server should be used for negotiating a
+ * WebRTC connection if the homeserver doesn't provide any servers. Defaults to false.
  */
 function MatrixClient(opts) {
     opts.baseUrl = utils.ensureNoTrailingSlash(opts.baseUrl);
@@ -221,6 +237,7 @@ function MatrixClient(opts) {
     this._verificationMethods = opts.verificationMethods;
 
     this._forceTURN = opts.forceTURN || false;
+    this._fallbackICEServerAllowed = opts.fallbackICEServerAllowed || false;
 
     // List of which rooms have encryption enabled: separate from crypto because
     // we still want to know which rooms are encrypted even if crypto is disabled:
@@ -230,7 +247,9 @@ function MatrixClient(opts) {
     // The pushprocessor caches useful things, so keep one and re-use it
     this._pushProcessor = new PushProcessor(this);
 
-    this._serverSupportsLazyLoading = null;
+    // Cache of the server's /versions response
+    // TODO: This should expire: https://github.com/matrix-org/matrix-js-sdk/issues/1020
+    this._serverVersionsCache = null;
 
     this._cachedCapabilities = null; // { capabilities: {}, lastUpdated: timestamp }
 
@@ -2173,11 +2192,17 @@ MatrixClient.prototype.sendHtmlEmote = function(roomId, body, htmlBody, callback
  * Send a receipt.
  * @param {Event} event The event being acknowledged
  * @param {string} receiptType The kind of receipt e.g. "m.read"
+ * @param {object} opts Additional content to send alongside the receipt.
  * @param {module:client.callback} callback Optional.
  * @return {module:client.Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
-MatrixClient.prototype.sendReceipt = function(event, receiptType, callback) {
+MatrixClient.prototype.sendReceipt = function(event, receiptType, opts, callback) {
+    if (typeof(opts) === 'function') {
+        callback = opts;
+        opts = {};
+    }
+
     if (this.isGuest()) {
         return Promise.resolve({}); // guests cannot send receipts so don't bother.
     }
@@ -2188,7 +2213,7 @@ MatrixClient.prototype.sendReceipt = function(event, receiptType, callback) {
         $eventId: event.getId(),
     });
     const promise = this._http.authedRequest(
-        callback, "POST", path, undefined, {},
+        callback, "POST", path, undefined, opts || {},
     );
 
     const room = this.getRoom(event.getRoomId());
@@ -2201,17 +2226,32 @@ MatrixClient.prototype.sendReceipt = function(event, receiptType, callback) {
 /**
  * Send a read receipt.
  * @param {Event} event The event that has been read.
+ * @param {object} opts The options for the read receipt.
+ * @param {boolean} opts.hidden True to prevent the receipt from being sent to
+ * other users and homeservers. Default false (send to everyone). <b>This
+ * property is unstable and may change in the future.</b>
  * @param {module:client.callback} callback Optional.
  * @return {module:client.Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
-MatrixClient.prototype.sendReadReceipt = async function(event, callback) {
+MatrixClient.prototype.sendReadReceipt = async function(event, opts, callback) {
+    if (typeof(opts) === 'function') {
+        callback = opts;
+        opts = {};
+    }
+    if (!opts) opts = {};
+
     const eventId = event.getId();
     const room = this.getRoom(event.getRoomId());
     if (room && room.hasPendingEvent(eventId)) {
         throw new Error(`Cannot set read receipt to a pending event (${eventId})`);
     }
-    return this.sendReceipt(event, "m.read", callback);
+
+    const addlContent = {
+        "m.hidden": Boolean(opts.hidden),
+    };
+
+    return this.sendReceipt(event, "m.read", addlContent, callback);
 };
 
 /**
@@ -2224,9 +2264,14 @@ MatrixClient.prototype.sendReadReceipt = async function(event, callback) {
  * @param {string} rrEvent the event tracked by the read receipt. This is here for
  * convenience because the RR and the RM are commonly updated at the same time as each
  * other. The local echo of this receipt will be done if set. Optional.
+ * @param {object} opts Options for the read markers
+ * @param {object} opts.hidden True to hide the receipt from other users and homeservers.
+ * <b>This property is unstable and may change in the future.</b>
  * @return {module:client.Promise} Resolves: the empty object, {}.
  */
-MatrixClient.prototype.setRoomReadMarkers = async function(roomId, rmEventId, rrEvent) {
+MatrixClient.prototype.setRoomReadMarkers = async function(
+    roomId, rmEventId, rrEvent, opts,
+) {
     const room = this.getRoom(roomId);
     if (room && room.hasPendingEvent(rmEventId)) {
         throw new Error(`Cannot set read marker to a pending event (${rmEventId})`);
@@ -2244,7 +2289,7 @@ MatrixClient.prototype.setRoomReadMarkers = async function(roomId, rmEventId, rr
         }
     }
 
-    return this.setRoomReadMarkersHttpRequest(roomId, rmEventId, rrEventId);
+    return this.setRoomReadMarkersHttpRequest(roomId, rmEventId, rrEventId, opts);
 };
 
 /**
@@ -2428,7 +2473,12 @@ MatrixClient.prototype.inviteByEmail = function(roomId, email, callback) {
  * @return {module:client.Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
-MatrixClient.prototype.inviteByThreePid = function(roomId, medium, address, callback) {
+MatrixClient.prototype.inviteByThreePid = async function(
+    roomId,
+    medium,
+    address,
+    callback,
+) {
     const path = utils.encodeUri(
         "/rooms/$roomId/invite",
         { $roomId: roomId },
@@ -2441,12 +2491,24 @@ MatrixClient.prototype.inviteByThreePid = function(roomId, medium, address, call
             errcode: "ORG.MATRIX.JSSDK_MISSING_PARAM",
         }));
     }
-
-    return this._http.authedRequest(callback, "POST", path, undefined, {
+    const params = {
         id_server: identityServerUrl,
         medium: medium,
         address: address,
-    });
+    };
+
+    if (
+        this.identityServer &&
+        this.identityServer.getAccessToken &&
+        await this.doesServerAcceptIdentityAccessToken()
+    ) {
+        const identityAccessToken = await this.identityServer.getAccessToken();
+        if (identityAccessToken) {
+            params.id_access_token = identityAccessToken;
+        }
+    }
+
+    return this._http.authedRequest(callback, "POST", path, undefined, params);
 };
 
 /**
@@ -3235,14 +3297,9 @@ MatrixClient.prototype.setGuestAccess = function(roomId, opts) {
 
 /**
  * Requests an email verification token for the purposes of registration.
- * This API proxies the Identity Server /validate/email/requestToken API,
- * adding registration-specific behaviour. Specifically, if an account with
- * the given email address already exists, it will either send an email
- * to the address informing them of this or return M_THREEPID_IN_USE
- * (which one is up to the Home Server).
- *
- * requestEmailToken calls the equivalent API directly on the ID server,
- * therefore bypassing the registration-specific logic.
+ * This API requests a token from the homeserver.
+ * The doesServerRequireIdServerParam() method can be used to determine if
+ * the server requires the id_server parameter to be provided.
  *
  * Parameters and return value are as for requestEmailToken
 
@@ -3267,8 +3324,9 @@ MatrixClient.prototype.requestRegisterEmailToken = function(email, clientSecret,
 
 /**
  * Requests a text message verification token for the purposes of registration.
- * This API proxies the Identity Server /validate/msisdn/requestToken API,
- * adding registration-specific behaviour, as with requestRegisterEmailToken.
+ * This API requests a token from the homeserver.
+ * The doesServerRequireIdServerParam() method can be used to determine if
+ * the server requires the id_server parameter to be provided.
  *
  * @param {string} phoneCountry The ISO 3166-1 alpha-2 code for the country in which
  *    phoneNumber should be parsed relative to.
@@ -3295,15 +3353,13 @@ MatrixClient.prototype.requestRegisterMsisdnToken = function(phoneCountry, phone
 /**
  * Requests an email verification token for the purposes of adding a
  * third party identifier to an account.
- * This API proxies the Identity Server /validate/email/requestToken API,
- * adding specific behaviour for the addition of email addresses to an
- * account. Specifically, if an account with
- * the given email address already exists, it will either send an email
- * to the address informing them of this or return M_THREEPID_IN_USE
- * (which one is up to the Home Server).
- *
- * requestEmailToken calls the equivalent API directly on the ID server,
- * therefore bypassing the email addition specific logic.
+ * This API requests a token from the homeserver.
+ * The doesServerRequireIdServerParam() method can be used to determine if
+ * the server requires the id_server parameter to be provided.
+ * If an account with the given email address already exists and is
+ * associated with an account other than the one the user is authed as,
+ * it will either send an email to the address informing them of this
+ * or return M_THREEPID_IN_USE (which one is up to the Home Server).
  *
  * @param {string} email As requestEmailToken
  * @param {string} clientSecret As requestEmailToken
@@ -3419,15 +3475,30 @@ MatrixClient.prototype.requestPasswordMsisdnToken = function(phoneCountry, phone
  * @param {object} params Parameters for the POST request
  * @return {module:client.Promise} Resolves: As requestEmailToken
  */
-MatrixClient.prototype._requestTokenFromEndpoint = function(endpoint, params) {
-    const id_server_url = url.parse(this.idBaseUrl);
-    if (id_server_url.host === null) {
-        throw new Error("Invalid ID server URL: " + this.idBaseUrl);
+MatrixClient.prototype._requestTokenFromEndpoint = async function(endpoint, params) {
+    const postParams = Object.assign({}, params);
+
+    // If the HS supports separate add and bind, then requestToken endpoints
+    // don't need an IS as they are all validated by the HS directly.
+    if (!await this.doesServerSupportSeparateAddAndBind() && this.idBaseUrl) {
+        const idServerUrl = url.parse(this.idBaseUrl);
+        if (!idServerUrl.host) {
+            throw new Error("Invalid ID server URL: " + this.idBaseUrl);
+        }
+        postParams.id_server = idServerUrl.host;
+
+        if (
+            this.identityServer &&
+            this.identityServer.getAccessToken &&
+            await this.doesServerAcceptIdentityAccessToken()
+        ) {
+            const identityAccessToken = await this.identityServer.getAccessToken();
+            if (identityAccessToken) {
+                postParams.id_access_token = identityAccessToken;
+            }
+        }
     }
 
-    const postParams = Object.assign({}, params, {
-        id_server: id_server_url.host,
-    });
     return this._http.request(
         undefined, "POST", endpoint, undefined,
         postParams,
@@ -3883,6 +3954,77 @@ MatrixClient.prototype.getTurnServers = function() {
     return this._turnServers || [];
 };
 
+/**
+ * Set whether to allow a fallback ICE server should be used for negotiating a
+ * WebRTC connection if the homeserver doesn't provide any servers. Defaults to
+ * false.
+ *
+ * @param {boolean} allow
+ */
+MatrixClient.prototype.setFallbackICEServerAllowed = function(allow) {
+    this._fallbackICEServerAllowed = allow;
+};
+
+/**
+ * Get whether to allow a fallback ICE server should be used for negotiating a
+ * WebRTC connection if the homeserver doesn't provide any servers. Defaults to
+ * false.
+ *
+ * @returns {boolean}
+ */
+MatrixClient.prototype.isFallbackICEServerAllowed = function() {
+    return this._fallbackICEServerAllowed;
+};
+
+// Synapse-specific APIs
+// =====================
+
+/**
+ * Determines if the current user is an administrator of the Synapse homeserver.
+ * Returns false if untrue or the homeserver does not appear to be a Synapse
+ * homeserver. <strong>This function is implementation specific and may change
+ * as a result.</strong>
+ * @return {boolean} true if the user appears to be a Synapse administrator.
+ */
+MatrixClient.prototype.isSynapseAdministrator = function() {
+    return this.whoisSynapseUser(this.getUserId())
+        .then(() => true)
+        .catch(() => false);
+};
+
+/**
+ * Performs a whois lookup on a user using Synapse's administrator API.
+ * <strong>This function is implementation specific and may change as a
+ * result.</strong>
+ * @param {string} userId the User ID to look up.
+ * @return {object} the whois response - see Synapse docs for information.
+ */
+MatrixClient.prototype.whoisSynapseUser = function(userId) {
+    const path = utils.encodeUri(
+        "/_synapse/admin/v1/whois/$userId",
+        { $userId: userId },
+    );
+    return this._http.authedRequest(
+        undefined, 'GET', path, undefined, undefined, {prefix: ''},
+    );
+};
+
+/**
+ * Deactivates a user using Synapse's administrator API. <strong>This
+ * function is implementation specific and may change as a result.</strong>
+ * @param {string} userId the User ID to deactivate.
+ * @return {object} the deactivate response - see Synapse docs for information.
+ */
+MatrixClient.prototype.deactivateSynapseUser = function(userId) {
+    const path = utils.encodeUri(
+        "/_synapse/admin/v1/deactivate/$userId",
+        { $userId: userId },
+    );
+    return this._http.authedRequest(
+        undefined, 'POST', path, undefined, undefined, {prefix: ''},
+    );
+};
+
 // Higher level APIs
 // =================
 
@@ -4014,13 +4156,14 @@ MatrixClient.prototype.stopClient = function() {
     global.clearTimeout(this._checkTurnServersTimeoutID);
 };
 
-/*
- * Query the server to see if it support members lazy loading
- * @return {Promise<boolean>} true if server supports lazy loading
+/**
+ * Get the API versions supported by the server, along with any
+ * unstable APIs it supports
+ * @return {Promise<object>} The server /versions response
  */
-MatrixClient.prototype.doesServerSupportLazyLoading = async function() {
-    if (this._serverSupportsLazyLoading === null) {
-        const response = await this._http.request(
+MatrixClient.prototype.getVersions = async function() {
+    if (this._serverVersionsCache === null) {
+        this._serverVersionsCache = await this._http.request(
             undefined, // callback
             "GET", "/_matrix/client/versions",
             undefined, // queryParams
@@ -4029,18 +4172,80 @@ MatrixClient.prototype.doesServerSupportLazyLoading = async function() {
                 prefix: '',
             },
         );
-
-        const versions = response["versions"];
-        const unstableFeatures = response["unstable_features"];
-
-        this._serverSupportsLazyLoading =
-            (versions && versions.includes("r0.5.0"))
-            || (unstableFeatures && unstableFeatures["m.lazy_load_members"]);
     }
-    return this._serverSupportsLazyLoading;
+    return this._serverVersionsCache;
 };
 
-/*
+/**
+ * Query the server to see if it support members lazy loading
+ * @return {Promise<boolean>} true if server supports lazy loading
+ */
+MatrixClient.prototype.doesServerSupportLazyLoading = async function() {
+    const response = await this.getVersions();
+
+    const versions = response["versions"];
+    const unstableFeatures = response["unstable_features"];
+
+    return (versions && versions.includes("r0.5.0"))
+        || (unstableFeatures && unstableFeatures["m.lazy_load_members"]);
+};
+
+/**
+ * Query the server to see if the `id_server` parameter is required
+ * when registering with an 3pid, adding a 3pid or resetting password.
+ * @return {Promise<boolean>} true if id_server parameter is required
+ */
+MatrixClient.prototype.doesServerRequireIdServerParam = async function() {
+    const response = await this.getVersions();
+
+    const versions = response["versions"];
+
+    // Supporting r0.6.0 is the same as having the flag set to false
+    if (versions && versions.includes("r0.6.0")) {
+        return false;
+    }
+
+    const unstableFeatures = response["unstable_features"];
+    if (unstableFeatures["m.require_identity_server"] === undefined) {
+        return true;
+    } else {
+        return unstableFeatures["m.require_identity_server"];
+    }
+};
+
+/**
+ * Query the server to see if the `id_access_token` parameter can be safely
+ * passed to the homeserver. Some homeservers may trigger errors if they are not
+ * prepared for the new parameter.
+ * @return {Promise<boolean>} true if id_access_token can be sent
+ */
+MatrixClient.prototype.doesServerAcceptIdentityAccessToken = async function() {
+    const response = await this.getVersions();
+
+    const versions = response["versions"];
+    const unstableFeatures = response["unstable_features"];
+
+    return (versions && versions.includes("r0.6.0"))
+        || (unstableFeatures && unstableFeatures["m.id_access_token"]);
+};
+
+/**
+ * Query the server to see if it supports separate 3PID add and bind functions.
+ * This affects the sequence of API calls clients should use for these operations,
+ * so it's helpful to be able to check for support.
+ * @return {Promise<boolean>} true if separate functions are supported
+ */
+MatrixClient.prototype.doesServerSupportSeparateAddAndBind = async function() {
+    const response = await this.getVersions();
+
+    const versions = response["versions"];
+    const unstableFeatures = response["unstable_features"];
+
+    return (versions && versions.includes("r0.6.0"))
+        || (unstableFeatures && unstableFeatures["m.separate_add_and_bind"]);
+};
+
+/**
  * Get if lazy loading members is being used.
  * @return {boolean} Whether or not members are lazy loaded by this client
  */
@@ -4048,7 +4253,7 @@ MatrixClient.prototype.hasLazyLoadMembersEnabled = function() {
     return !!this._clientOpts.lazyLoadMembers;
 };
 
-/*
+/**
  * Set a function which is called when /sync returns a 'limited' response.
  * It is called with a room ID and returns a boolean. It should return 'true' if the SDK
  * can SAFELY remove events from this room. It may not be safe to remove events if there
@@ -4333,10 +4538,9 @@ function checkTurnServers(client) {
         }
     }, function(err) {
         logger.error("Failed to get TURN URIs");
-        client._checkTurnServersTimeoutID =
-            setTimeout(function() {
- checkTurnServers(client);
-}, 60000);
+        client._checkTurnServersTimeoutID = setTimeout(function() {
+            checkTurnServers(client);
+        }, 60000);
     });
 }
 

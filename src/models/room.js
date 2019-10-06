@@ -1057,6 +1057,18 @@ Room.prototype._addLiveEvent = function(event, duplicateStrategy) {
         const redactedEvent = this.getUnfilteredTimelineSet().findEventById(redactId);
         if (redactedEvent) {
             redactedEvent.makeRedacted(event);
+
+            // If this is in the current state, replace it with the redacted version
+            if (redactedEvent.getStateKey()) {
+                const currentStateEvent = this.currentState.getStateEvents(
+                    redactedEvent.getType(),
+                    redactedEvent.getStateKey(),
+                );
+                if (currentStateEvent.getId() === redactedEvent.getId()) {
+                    this.currentState.setStateEvents([redactedEvent]);
+                }
+            }
+
             this.emit("Room.redaction", event, this);
 
             // TODO: we stash user displaynames (among other things) in
@@ -1175,7 +1187,7 @@ Room.prototype.addPendingEvent = function(event, txnId) {
         for (let i = 0; i < this._timelineSets.length; i++) {
             const timelineSet = this._timelineSets[i];
             if (timelineSet.getFilter()) {
-                if (this._filter.filterRoomTimeline([event]).length) {
+                if (timelineSet.getFilter().filterRoomTimeline([event]).length) {
                     timelineSet.addEventToTimeline(event,
                         timelineSet.getLiveTimeline(), false);
                 }
@@ -1204,7 +1216,7 @@ Room.prototype._aggregateNonLiveRelation = function(event) {
     for (let i = 0; i < this._timelineSets.length; i++) {
         const timelineSet = this._timelineSets[i];
         if (timelineSet.getFilter()) {
-            if (this._filter.filterRoomTimeline([event]).length) {
+            if (timelineSet.getFilter().filterRoomTimeline([event]).length) {
                 timelineSet.aggregateRelations(event);
             }
         } else {
