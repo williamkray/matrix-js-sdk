@@ -5,9 +5,6 @@ const EventStatus = sdk.EventStatus;
 const HttpBackend = require("matrix-mock-request");
 const utils = require("../test-utils");
 
-import Promise from 'bluebird';
-import expect from 'expect';
-
 describe("MatrixClient room timelines", function() {
     const baseUrl = "http://localhost.or.something";
     let client = null;
@@ -103,8 +100,7 @@ describe("MatrixClient room timelines", function() {
         });
     }
 
-    beforeEach(function(done) {
-        utils.beforeEach(this); // eslint-disable-line babel/no-invalid-this
+    beforeEach(function() {
         httpBackend = new HttpBackend();
         sdk.request(httpBackend.requestFn);
         client = sdk.createClient({
@@ -122,9 +118,9 @@ describe("MatrixClient room timelines", function() {
             return NEXT_SYNC_DATA;
         });
         client.startClient();
-        httpBackend.flush("/pushrules").then(function() {
+        return httpBackend.flush("/pushrules").then(function() {
             return httpBackend.flush("/filter");
-        }).nodeify(done);
+        });
     });
 
     afterEach(function() {
@@ -153,7 +149,7 @@ describe("MatrixClient room timelines", function() {
                 expect(member.userId).toEqual(userId);
                 expect(member.name).toEqual(userName);
 
-                httpBackend.flush("/sync", 1).done(function() {
+                httpBackend.flush("/sync", 1).then(function() {
                     done();
                 });
             });
@@ -179,10 +175,10 @@ describe("MatrixClient room timelines", function() {
                     return;
                 }
                 const room = client.getRoom(roomId);
-                client.sendTextMessage(roomId, "I am a fish", "txn1").done(
+                client.sendTextMessage(roomId, "I am a fish", "txn1").then(
                 function() {
                     expect(room.timeline[1].getId()).toEqual(eventId);
-                    httpBackend.flush("/sync", 1).done(function() {
+                    httpBackend.flush("/sync", 1).then(function() {
                         expect(room.timeline[1].getId()).toEqual(eventId);
                         done();
                     });
@@ -212,10 +208,10 @@ describe("MatrixClient room timelines", function() {
                 }
                 const room = client.getRoom(roomId);
                 const promise = client.sendTextMessage(roomId, "I am a fish", "txn1");
-                httpBackend.flush("/sync", 1).done(function() {
+                httpBackend.flush("/sync", 1).then(function() {
                     expect(room.timeline.length).toEqual(2);
                     httpBackend.flush("/txn1", 1);
-                    promise.done(function() {
+                    promise.then(function() {
                         expect(room.timeline.length).toEqual(2);
                         expect(room.timeline[1].getId()).toEqual(eventId);
                         done();
@@ -250,7 +246,7 @@ describe("MatrixClient room timelines", function() {
                 const room = client.getRoom(roomId);
                 expect(room.timeline.length).toEqual(1);
 
-                client.scrollback(room).done(function() {
+                client.scrollback(room).then(function() {
                     expect(room.timeline.length).toEqual(1);
                     expect(room.oldState.paginationToken).toBe(null);
 
@@ -314,7 +310,7 @@ describe("MatrixClient room timelines", function() {
                 // sync response
                 expect(room.timeline.length).toEqual(1);
 
-                client.scrollback(room).done(function() {
+                client.scrollback(room).then(function() {
                     expect(room.timeline.length).toEqual(5);
                     const joinMsg = room.timeline[0];
                     expect(joinMsg.sender.name).toEqual("Old Alice");
@@ -352,7 +348,7 @@ describe("MatrixClient room timelines", function() {
                 const room = client.getRoom(roomId);
                 expect(room.timeline.length).toEqual(1);
 
-                client.scrollback(room).done(function() {
+                client.scrollback(room).then(function() {
                     expect(room.timeline.length).toEqual(3);
                     expect(room.timeline[0].event).toEqual(sbEvents[1]);
                     expect(room.timeline[1].event).toEqual(sbEvents[0]);
@@ -383,11 +379,11 @@ describe("MatrixClient room timelines", function() {
                 const room = client.getRoom(roomId);
                 expect(room.oldState.paginationToken).toBeTruthy();
 
-                client.scrollback(room, 1).done(function() {
+                client.scrollback(room, 1).then(function() {
                     expect(room.oldState.paginationToken).toEqual(sbEndTok);
                 });
 
-                httpBackend.flush("/messages", 1).done(function() {
+                httpBackend.flush("/messages", 1).then(function() {
                     // still have a sync to flush
                     httpBackend.flush("/sync", 1).then(() => {
                         done();

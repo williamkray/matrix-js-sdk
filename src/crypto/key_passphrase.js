@@ -1,5 +1,6 @@
 /*
 Copyright 2018 New Vector Ltd
+Copyright 2019 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,12 +19,10 @@ import { randomString } from '../randomstring';
 
 const DEFAULT_ITERATIONS = 500000;
 
-export async function keyForExistingBackup(backupData, password) {
+export async function keyFromAuthData(authData, password) {
     if (!global.Olm) {
         throw new Error("Olm is not available");
     }
-
-    const authData = backupData.auth_data;
 
     if (!authData.private_key_salt || !authData.private_key_iterations) {
         throw new Error(
@@ -33,12 +32,12 @@ export async function keyForExistingBackup(backupData, password) {
     }
 
     return await deriveKey(
-        password, backupData.auth_data.private_key_salt,
-        backupData.auth_data.private_key_iterations,
+        password, authData.private_key_salt,
+        authData.private_key_iterations,
     );
 }
 
-export async function keyForNewBackup(password) {
+export async function keyFromPassphrase(password) {
     if (!global.Olm) {
         throw new Error("Olm is not available");
     }
@@ -50,7 +49,7 @@ export async function keyForNewBackup(password) {
     return { key, salt, iterations: DEFAULT_ITERATIONS };
 }
 
-async function deriveKey(password, salt, iterations) {
+export async function deriveKey(password, salt, iterations) {
     const subtleCrypto = global.crypto.subtle;
     const TextEncoder = global.TextEncoder;
     if (!subtleCrypto || !TextEncoder) {

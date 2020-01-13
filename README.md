@@ -161,7 +161,7 @@ which will be fulfilled in the future.
 The typical usage is something like:
 
 ```javascript
-  matrixClient.someMethod(arg1, arg2).done(function(result) {
+  matrixClient.someMethod(arg1, arg2).then(function(result) {
     ...
   });
 ```
@@ -206,7 +206,7 @@ core functionality of the SDK. These examples assume the SDK is setup like this:
 ```javascript
    matrixClient.on("RoomMember.membership", function(event, member) {
        if (member.membership === "invite" && member.userId === myUserId) {
-           matrixClient.joinRoom(member.roomId).done(function() {
+           matrixClient.joinRoom(member.roomId).then(function() {
                console.log("Auto-joined %s", member.roomId);
            });
        }
@@ -297,7 +297,7 @@ End-to-end encryption support
 =============================
 
 The SDK supports end-to-end encryption via the Olm and Megolm protocols, using
-[libolm](https://gitlab.matrix.org/matrix-org/olm). It is left up to the 
+[libolm](https://gitlab.matrix.org/matrix-org/olm). It is left up to the
 application to make libolm available, via the ``Olm`` global.
 
 It is also necessry to call ``matrixClient.initCrypto()`` after creating a new
@@ -319,16 +319,16 @@ To provide the Olm library in a browser application:
 
  * download the transpiled libolm (from https://packages.matrix.org/npm/olm/).
  * load ``olm.js`` as a ``<script>`` *before* ``browser-matrix.js``.
- 
+
 To provide the Olm library in a node.js application:
 
- * ``yarn add https://packages.matrix.org/npm/olm/olm-3.0.0.tgz``
+ * ``yarn add https://packages.matrix.org/npm/olm/olm-3.1.4.tgz``
    (replace the URL with the latest version you want to use from
     https://packages.matrix.org/npm/olm/)
  * ``global.Olm = require('olm');`` *before* loading ``matrix-js-sdk``.
 
 If you want to package Olm as dependency for your node.js application, you can
-use ``yarn add https://packages.matrix.org/npm/olm/olm-3.0.0.tgz``. If your
+use ``yarn add https://packages.matrix.org/npm/olm/olm-3.1.4.tgz``. If your
 application also works without e2e crypto enabled, add ``--optional`` to mark it
 as an optional dependency.
 

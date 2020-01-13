@@ -1,3 +1,182 @@
+Changes in [3.0.0](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v3.0.0) (2020-01-13)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v3.0.0-rc.1...v3.0.0)
+
+ * No changes from rc.1
+
+Changes in [3.0.0-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v3.0.0-rc.1) (2020-01-06)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v2.4.6...v3.0.0-rc.1)
+
+BREAKING CHANGES
+================
+ * matrix-js-sdk no longer uses bluebird promises, so promises returned
+   by the js-sdk no longer support the done() method. Code that calls
+   done() on promises returned by the js-sdk will break and will need
+   to be updated to remove the done() call.
+
+All Changes
+===========
+ * Make displayName disambiguation more fuzzy especially against RTL/LTR
+   content
+   [\#1141](https://github.com/matrix-org/matrix-js-sdk/pull/1141)
+ * stop trying to resend event if we get M_TOO_LARGE
+   [\#1129](https://github.com/matrix-org/matrix-js-sdk/pull/1129)
+ * Fix creating a key backup with cross signing diabled
+   [\#1139](https://github.com/matrix-org/matrix-js-sdk/pull/1139)
+ * Use checkDeviceTrust with key backup
+   [\#1138](https://github.com/matrix-org/matrix-js-sdk/pull/1138)
+ * Add support for passthrough SSSS secrets
+   [\#1128](https://github.com/matrix-org/matrix-js-sdk/pull/1128)
+ * Add support for key backups using secret storage
+   [\#1118](https://github.com/matrix-org/matrix-js-sdk/pull/1118)
+ * Remove unused user verification event
+   [\#1117](https://github.com/matrix-org/matrix-js-sdk/pull/1117)
+ * Fix check for private keys
+   [\#1116](https://github.com/matrix-org/matrix-js-sdk/pull/1116)
+ * Restore watching mode for `start:watch`
+   [\#1115](https://github.com/matrix-org/matrix-js-sdk/pull/1115)
+ * Add secret storage bootstrap flow
+   [\#1079](https://github.com/matrix-org/matrix-js-sdk/pull/1079)
+ * Part 1 of many: Upgrade to babel@7 and TypeScript
+   [\#1112](https://github.com/matrix-org/matrix-js-sdk/pull/1112)
+ * Remove Bluebird: phase 2.5
+   [\#1100](https://github.com/matrix-org/matrix-js-sdk/pull/1100)
+ * Remove Bluebird: phase 3
+   [\#1088](https://github.com/matrix-org/matrix-js-sdk/pull/1088)
+ * ignore m.key.verification.done messages when we don't expect any more
+   messages
+   [\#1104](https://github.com/matrix-org/matrix-js-sdk/pull/1104)
+ * dont cancel on remote echo of own .request event
+   [\#1111](https://github.com/matrix-org/matrix-js-sdk/pull/1111)
+ * Refactor verification request code
+   [\#1109](https://github.com/matrix-org/matrix-js-sdk/pull/1109)
+ * Fix device list's cross-signing storage path
+   [\#1105](https://github.com/matrix-org/matrix-js-sdk/pull/1105)
+ * yarn upgrade
+   [\#1103](https://github.com/matrix-org/matrix-js-sdk/pull/1103)
+
+Changes in [2.4.6](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v2.4.6) (2019-12-09)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v2.4.6-rc.1...v2.4.6)
+
+ * No changes since rc.1
+
+Changes in [2.4.6-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v2.4.6-rc.1) (2019-12-04)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v2.4.5...v2.4.6-rc.1)
+
+ * Update alias handling
+   [\#1102](https://github.com/matrix-org/matrix-js-sdk/pull/1102)
+ * increase timeout on flush to fix failing unit test
+   [\#1096](https://github.com/matrix-org/matrix-js-sdk/pull/1096)
+ * Disable broken cross-signing test
+   [\#1095](https://github.com/matrix-org/matrix-js-sdk/pull/1095)
+ * Fix a couple SAS tests
+   [\#1094](https://github.com/matrix-org/matrix-js-sdk/pull/1094)
+ * Fix Olm unwedging test
+   [\#1093](https://github.com/matrix-org/matrix-js-sdk/pull/1093)
+ * Fix empty string handling in push notifications
+   [\#1089](https://github.com/matrix-org/matrix-js-sdk/pull/1089)
+ * expand e2ee logging to better debug UISIs
+   [\#1090](https://github.com/matrix-org/matrix-js-sdk/pull/1090)
+ * Remove Bluebird: phase 2
+   [\#1087](https://github.com/matrix-org/matrix-js-sdk/pull/1087)
+ * Relax identity server discovery checks to FAIL_PROMPT
+   [\#1062](https://github.com/matrix-org/matrix-js-sdk/pull/1062)
+ * Fix incorrect return value of MatrixClient.prototype.uploadKeys
+   [\#1061](https://github.com/matrix-org/matrix-js-sdk/pull/1061)
+ * Fix calls in e2e rooms
+   [\#1086](https://github.com/matrix-org/matrix-js-sdk/pull/1086)
+ * Monitor verification request over DM as well
+   [\#1085](https://github.com/matrix-org/matrix-js-sdk/pull/1085)
+ * Remove 'check' npm script
+   [\#1084](https://github.com/matrix-org/matrix-js-sdk/pull/1084)
+ * Always process call events in batches
+   [\#1083](https://github.com/matrix-org/matrix-js-sdk/pull/1083)
+ * Fix ringing chirp on loading
+   [\#1082](https://github.com/matrix-org/matrix-js-sdk/pull/1082)
+ * Remove *most* bluebird specific things
+   [\#1081](https://github.com/matrix-org/matrix-js-sdk/pull/1081)
+ * Switch to Jest
+   [\#1080](https://github.com/matrix-org/matrix-js-sdk/pull/1080)
+
+Changes in [2.4.5](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v2.4.5) (2019-11-27)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v2.4.4...v2.4.5)
+
+* Relax identity server discovery checks to FAIL_PROMPT
+* Expand E2EE debug logging to diagnose "unable to decrypt" errors
+
+Changes in [2.4.4](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v2.4.4) (2019-11-25)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v2.4.4-rc.1...v2.4.4)
+
+ * No changes since rc.1
+
+Changes in [2.4.4-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v2.4.4-rc.1) (2019-11-20)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v2.4.3...v2.4.4-rc.1)
+
+ * Fix SAS verification in encrypted DMs
+   [\#1077](https://github.com/matrix-org/matrix-js-sdk/pull/1077)
+ * Cross-signing / secret storage tweaks
+   [\#1078](https://github.com/matrix-org/matrix-js-sdk/pull/1078)
+ * Fix local trust for key backups
+   [\#1075](https://github.com/matrix-org/matrix-js-sdk/pull/1075)
+ * Add method to get last active timestamp in room
+   [\#1072](https://github.com/matrix-org/matrix-js-sdk/pull/1072)
+ * Check the right Synapse endpoint for determining admin capabilities
+   [\#1071](https://github.com/matrix-org/matrix-js-sdk/pull/1071)
+ * Cross Signing Support
+   [\#832](https://github.com/matrix-org/matrix-js-sdk/pull/832)
+ * Don't double cancel verification request
+   [\#1064](https://github.com/matrix-org/matrix-js-sdk/pull/1064)
+ * Support for verification requests in the timeline
+   [\#1067](https://github.com/matrix-org/matrix-js-sdk/pull/1067)
+ * Use stable API prefix for 3PID APIs when supported
+   [\#1066](https://github.com/matrix-org/matrix-js-sdk/pull/1066)
+ * Remove Jenkins scripts
+   [\#1063](https://github.com/matrix-org/matrix-js-sdk/pull/1063)
+
+Changes in [2.4.3](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v2.4.3) (2019-11-04)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v2.4.3-rc.1...v2.4.3)
+
+ * No changes since rc.1
+
+Changes in [2.4.3-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v2.4.3-rc.1) (2019-10-30)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v2.4.2...v2.4.3-rc.1)
+
+ * fix the path in references to logger.js
+   [\#1056](https://github.com/matrix-org/matrix-js-sdk/pull/1056)
+ * verification in DMs
+   [\#1050](https://github.com/matrix-org/matrix-js-sdk/pull/1050)
+ * Properly documented the function possible returns
+   [\#1054](https://github.com/matrix-org/matrix-js-sdk/pull/1054)
+ * Downgrade to Bluebird 3.5.5 to fix Firefox
+   [\#1055](https://github.com/matrix-org/matrix-js-sdk/pull/1055)
+ * Upgrade safe deps to latest major version
+   [\#1053](https://github.com/matrix-org/matrix-js-sdk/pull/1053)
+ * Don't include .js in the import string.
+   [\#1052](https://github.com/matrix-org/matrix-js-sdk/pull/1052)
+
+Changes in [2.4.2](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v2.4.2) (2019-10-18)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v2.4.2-rc.1...v2.4.2)
+
+ * No changes since v2.4.2-rc.1
+
+Changes in [2.4.2-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v2.4.2-rc.1) (2019-10-09)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v2.4.1...v2.4.2-rc.1)
+
+ * Log state of Olm sessions
+   [\#1047](https://github.com/matrix-org/matrix-js-sdk/pull/1047)
+ * Add method to get access to all timelines
+   [\#1048](https://github.com/matrix-org/matrix-js-sdk/pull/1048)
+
 Changes in [2.4.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v2.4.1) (2019-10-01)
 ================================================================================================
 [Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v2.4.0...v2.4.1)

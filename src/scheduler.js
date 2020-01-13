@@ -20,8 +20,7 @@ limitations under the License.
  * @module scheduler
  */
 const utils = require("./utils");
-import Promise from 'bluebird';
-import logger from '../src/logger';
+import logger from './logger';
 
 const DEBUG = false;  // set true to enable console logging.
 
@@ -121,7 +120,7 @@ MatrixScheduler.prototype.queueEvent = function(event) {
     if (!this._queues[queueName]) {
         this._queues[queueName] = [];
     }
-    const defer = Promise.defer();
+    const defer = utils.defer();
     this._queues[queueName].push({
         event: event,
         defer: defer,
@@ -154,6 +153,11 @@ MatrixScheduler.RETRY_BACKOFF_RATELIMIT = function(event, attempts, err) {
     // we ship with browser-request which returns { cors: rejected } when trying
     // with no connection, so if we match that, give up since they have no conn.
     if (err.cors === "rejected") {
+        return -1;
+    }
+
+    // if event that we are trying to send is too large in any way then retrying won't help
+    if (err.name === "M_TOO_LARGE") {
         return -1;
     }
 

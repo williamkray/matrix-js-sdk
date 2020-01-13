@@ -22,8 +22,7 @@ limitations under the License.
  * @module crypto/algorithms/megolm
  */
 
-import Promise from 'bluebird';
-import logger from '../../../src/logger';
+import logger from '../../logger';
 
 const utils = require("../../utils");
 const olmlib = require("../olmlib");
@@ -104,7 +103,7 @@ OutboundSessionInfo.prototype.sharedWithTooManyDevices = function(
         }
 
         if (!devicesInRoom.hasOwnProperty(userId)) {
-            logger.log("Starting new session because we shared with " + userId);
+            logger.log("Starting new megolm session because we shared with " + userId);
             return true;
         }
 
@@ -115,7 +114,7 @@ OutboundSessionInfo.prototype.sharedWithTooManyDevices = function(
 
             if (!devicesInRoom[userId].hasOwnProperty(deviceId)) {
                 logger.log(
-                    "Starting new session because we shared with " +
+                    "Starting new megolm session because we shared with " +
                         userId + ":" + deviceId,
                 );
                 return true;
@@ -200,6 +199,8 @@ MegolmEncryption.prototype._ensureOutboundSession = function(devicesInRoom) {
         if (!session) {
             logger.log(`Starting new megolm session for room ${self._roomId}`);
             session = await self._prepareNewSession();
+            logger.log(`Started new megolm session ${session.sessionId} ` +
+                       `for room ${self._roomId}`);
             self._outboundSessions[session.sessionId] = session;
         }
 
@@ -278,7 +279,7 @@ MegolmEncryption.prototype._prepareNewSession = async function() {
         ).catch((e) => {
             // This throws if the upload failed, but this is fine
             // since it will have written it to the db and will retry.
-            logger.log("Failed to back up group session", e);
+            logger.log("Failed to back up megolm session", e);
         });
     }
 
@@ -440,19 +441,19 @@ MegolmEncryption.prototype.reshareKeyWithDevice = async function(
 ) {
     const obSessionInfo = this._outboundSessions[sessionId];
     if (!obSessionInfo) {
-        logger.debug("Session ID " + sessionId + " not found: not re-sharing keys");
+        logger.debug(`megolm session ${sessionId} not found: not re-sharing keys`);
         return;
     }
 
     // The chain index of the key we previously sent this device
     if (obSessionInfo.sharedWithDevices[userId] === undefined) {
-        logger.debug("Session ID " + sessionId + " never shared with user " + userId);
+        logger.debug(`megolm session ${sessionId} never shared with user ${userId}`);
         return;
     }
     const sentChainIndex = obSessionInfo.sharedWithDevices[userId][device.deviceId];
     if (sentChainIndex === undefined) {
         logger.debug(
-            "Session ID " + sessionId + " never shared with device " +
+            "megolm session ID " + sessionId + " never shared with device " +
             userId + ":" + device.deviceId,
         );
         return;
@@ -466,7 +467,7 @@ MegolmEncryption.prototype.reshareKeyWithDevice = async function(
 
     if (!key) {
         logger.warn(
-            "No outbound session key found for " + sessionId + ": not re-sharing keys",
+            `No inbound session key found for megolm ${sessionId}: not re-sharing keys`,
         );
         return;
     }
@@ -506,16 +507,15 @@ MegolmEncryption.prototype.reshareKeyWithDevice = async function(
         userId,
         device,
         payload,
-    ),
+    );
 
     await this._baseApis.sendToDevice("m.room.encrypted", {
         [userId]: {
             [device.deviceId]: encryptedContent,
         },
     });
-    logger.debug(
-        `Re-shared key for session ${sessionId}  with ${userId}:${device.deviceId}`,
-    );
+    logger.debug(`Re-shared key for megolm session ${sessionId} ` +
+                 `with ${userId}:${device.deviceId}`);
 };
 
 /**
@@ -550,10 +550,10 @@ MegolmEncryption.prototype._shareKeyWithDevices = async function(session, device
             await this._encryptAndSendKeysToDevices(
                 session, key.chain_index, userDeviceMaps[i], payload,
             );
-            logger.log(`Completed megolm keyshare in ${this._roomId} `
-                + `(slice ${i + 1}/${userDeviceMaps.length})`);
+            logger.log(`Completed megolm keyshare for ${session.sessionId} `
+                + `in ${this._roomId} (slice ${i + 1}/${userDeviceMaps.length})`);
         } catch (e) {
-            logger.log(`megolm keyshare in ${this._roomId} `
+            logger.log(`megolm keyshare for ${session.sessionId} in ${this._roomId} `
                 + `(slice ${i + 1}/${userDeviceMaps.length}) failed`);
 
             throw e;
@@ -922,7 +922,7 @@ MegolmDecryption.prototype.onRoomKeyEvent = function(event) {
         keysClaimed = event.getKeysClaimed();
     }
 
-    logger.log(`Adding key for megolm session ${senderKey}|${sessionId}`);
+    logger.log(`Received and adding key for megolm session ${senderKey}|${sessionId}`);
     return this._olmDevice.addInboundGroupSession(
         content.room_id, senderKey, forwardingKeyChain, sessionId,
         content.session_key, keysClaimed,
@@ -955,7 +955,7 @@ MegolmDecryption.prototype.onRoomKeyEvent = function(event) {
             ).catch((e) => {
                 // This throws if the upload failed, but this is fine
                 // since it will have written it to the db and will retry.
-                logger.log("Failed to back up group session", e);
+                logger.log("Failed to back up megolm session", e);
             });
         }
     }).catch((e) => {
@@ -1035,7 +1035,7 @@ MegolmDecryption.prototype.shareKeysWithDevice = function(keyRequest) {
             // TODO: retries
             return this._baseApis.sendToDevice("m.room.encrypted", contentMap);
         });
-    }).done();
+    });
 };
 
 MegolmDecryption.prototype._buildKeyForwardingMessage = async function(
@@ -1088,7 +1088,7 @@ MegolmDecryption.prototype.importRoomKey = function(session) {
             ).catch((e) => {
                 // This throws if the upload failed, but this is fine
                 // since it will have written it to the db and will retry.
-                logger.log("Failed to back up group session", e);
+                logger.log("Failed to back up megolm session", e);
             });
         }
         // have another go at decrypting events sent with this session.

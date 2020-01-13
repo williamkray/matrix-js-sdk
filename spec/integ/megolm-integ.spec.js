@@ -17,13 +17,11 @@ limitations under the License.
 "use strict";
 
 const anotherjson = require('another-json');
-import Promise from 'bluebird';
-import expect from 'expect';
 
 const utils = require('../../lib/utils');
 const testUtils = require('../test-utils');
 const TestClient = require('../TestClient').default;
-import logger from '../../src/logger';
+import logger from '../../lib/logger';
 
 const ROOM_ID = "!room:id";
 
@@ -283,8 +281,6 @@ describe("megolm", function() {
     }
 
     beforeEach(async function() {
-        testUtils.beforeEach(this); // eslint-disable-line babel/no-invalid-this
-
         aliceTestClient = new TestClient(
             "@alice:localhost", "xzcvb", "akjgkrgjs",
         );
@@ -713,7 +709,7 @@ describe("megolm", function() {
                 'PUT', '/send/',
             ).respond(200, function(path, content) {
                 logger.log('/send:', content);
-                expect(content.session_id).toNotEqual(megolmSessionId);
+                expect(content.session_id).not.toEqual(megolmSessionId);
                 return {
                     event_id: '$event_id',
                 };

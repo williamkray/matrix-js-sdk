@@ -675,7 +675,14 @@ module.exports.isNumber = function(value) {
 module.exports.removeHiddenChars = function(str) {
     return unhomoglyph(str.normalize('NFD').replace(removeHiddenCharsRegex, ''));
 };
-const removeHiddenCharsRegex = /[\u200B-\u200D\u0300-\u036f\uFEFF\s]/g;
+// Regex matching bunch of unicode control characters and otherwise misleading/invisible characters.
+// Includes:
+// various width spaces U+2000 - U+200D
+// LTR and RTL marks U+200E and U+200F
+// LTR/RTL and other directional formatting marks U+202A - U+202F
+// Combining characters U+0300 - U+036F
+// Zero width no-break space (BOM) U+FEFF
+const removeHiddenCharsRegex = /[\u2000-\u200F\u202A-\u202F\u0300-\u036f\uFEFF\s]/g;
 
 function escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -707,4 +714,36 @@ module.exports.ensureNoTrailingSlash = function(url) {
     } else {
         return url;
     }
+};
+
+// Returns a promise which resolves with a given value after the given number of ms
+module.exports.sleep = (ms, value) => new Promise((resolve => {
+    setTimeout(resolve, ms, value);
+}));
+
+module.exports.isNullOrUndefined = function(val) {
+    return val === null || val === undefined;
+};
+
+// Returns a Deferred
+module.exports.defer = () => {
+    let resolve;
+    let reject;
+
+    const promise = new Promise((_resolve, _reject) => {
+        resolve = _resolve;
+        reject = _reject;
+    });
+
+    return {resolve, reject, promise};
+};
+
+module.exports.promiseMapSeries = async (promises, fn) => {
+    for (const o of await promises) {
+        await fn(await o);
+    }
+};
+
+module.exports.promiseTry = (fn) => {
+    return new Promise((resolve) => resolve(fn()));
 };
