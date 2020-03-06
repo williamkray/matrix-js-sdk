@@ -16,7 +16,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-"use strict";
 
 /**
  * This is an internal module. MatrixBaseApis is currently only meant to be used
@@ -25,17 +24,22 @@ limitations under the License.
  * @module base-apis
  */
 
-import { SERVICE_TYPES } from './service-types';
-import logger from './logger';
-
-const httpApi = require("./http-api");
-const utils = require("./utils");
-const PushProcessor = require("./pushprocessor");
+import {SERVICE_TYPES} from './service-types';
+import {logger} from './logger';
+import {PushProcessor} from "./pushprocessor";
+import * as utils from "./utils";
+import {
+    MatrixHttpApi,
+    PREFIX_IDENTITY_V1,
+    PREFIX_IDENTITY_V2,
+    PREFIX_R0,
+    PREFIX_UNSTABLE,
+} from "./http-api";
 
 function termsUrlForService(serviceType, baseUrl) {
     switch (serviceType) {
         case SERVICE_TYPES.IS:
-            return baseUrl + httpApi.PREFIX_IDENTITY_V2 + '/terms';
+            return baseUrl + PREFIX_IDENTITY_V2 + '/terms';
         case SERVICE_TYPES.IM:
             return baseUrl + '/_matrix/integrations/v1/terms';
         default:
@@ -83,7 +87,7 @@ function termsUrlForService(serviceType, baseUrl) {
  * @param {boolean} [opts.useAuthorizationHeader = false] Set to true to use
  * Authorization header instead of query param to send the access token to the server.
  */
-function MatrixBaseApis(opts) {
+export function MatrixBaseApis(opts) {
     utils.checkObjectHasKeys(opts, ["baseUrl", "request"]);
 
     this.baseUrl = opts.baseUrl;
@@ -95,13 +99,13 @@ function MatrixBaseApis(opts) {
         idBaseUrl: opts.idBaseUrl,
         accessToken: opts.accessToken,
         request: opts.request,
-        prefix: httpApi.PREFIX_R0,
+        prefix: PREFIX_R0,
         onlyData: true,
         extraParams: opts.queryParams,
         localTimeoutMs: opts.localTimeoutMs,
         useAuthorizationHeader: opts.useAuthorizationHeader,
     };
-    this._http = new httpApi.MatrixHttpApi(this, httpOpts);
+    this._http = new MatrixHttpApi(this, httpOpts);
 
     this._txnCtr = 0;
 }
@@ -168,7 +172,7 @@ MatrixBaseApis.prototype.makeTxnId = function() {
  * Check whether a username is available prior to registration. An error response
  * indicates an invalid/unavailable username.
  * @param {string} username The username to check the availability of.
- * @return {module:client.Promise} Resolves: to `true`.
+ * @return {Promise} Resolves: to `true`.
  */
 MatrixBaseApis.prototype.isUsernameAvailable = function(username) {
     return this._http.authedRequest(
@@ -189,7 +193,7 @@ MatrixBaseApis.prototype.isUsernameAvailable = function(username) {
  * @param {string} guestAccessToken
  * @param {string} inhibitLogin
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.register = function(
@@ -254,7 +258,7 @@ MatrixBaseApis.prototype.register = function(
  * @param {Object=} opts Registration options
  * @param {Object} opts.body JSON HTTP body to provide.
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.registerGuest = function(opts, callback) {
@@ -267,7 +271,7 @@ MatrixBaseApis.prototype.registerGuest = function(opts, callback) {
  * @param {Object} data   parameters for registration request
  * @param {string=} kind  type of user to register. may be "guest"
  * @param {module:client.callback=} callback
- * @return {module:client.Promise} Resolves: to the /register response
+ * @return {Promise} Resolves: to the /register response
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.registerRequest = function(data, kind, callback) {
@@ -283,7 +287,7 @@ MatrixBaseApis.prototype.registerRequest = function(data, kind, callback) {
 
 /**
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.loginFlows = function(callback) {
@@ -294,7 +298,7 @@ MatrixBaseApis.prototype.loginFlows = function(callback) {
  * @param {string} loginType
  * @param {Object} data
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.login = function(loginType, data, callback) {
@@ -325,7 +329,7 @@ MatrixBaseApis.prototype.login = function(loginType, data, callback) {
  * @param {string} user
  * @param {string} password
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.loginWithPassword = function(user, password, callback) {
@@ -338,7 +342,7 @@ MatrixBaseApis.prototype.loginWithPassword = function(user, password, callback) 
 /**
  * @param {string} relayState URL Callback after SAML2 Authentication
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.loginWithSAML2 = function(relayState, callback) {
@@ -369,13 +373,13 @@ MatrixBaseApis.prototype.getSsoLoginUrl = function(redirectUrl, loginType) {
     }
     return this._http.getUrl("/login/"+loginType+"/redirect", {
         "redirectUrl": redirectUrl,
-    }, httpApi.PREFIX_R0);
+    }, PREFIX_R0);
 };
 
 /**
  * @param {string} token Login token previously received from homeserver
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.loginWithToken = function(token, callback) {
@@ -392,7 +396,7 @@ MatrixBaseApis.prototype.loginWithToken = function(token, callback) {
  * it is up to the caller to either reset or destroy the MatrixClient after
  * this method succeeds.
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: On success, the empty object
+ * @return {Promise} Resolves: On success, the empty object
  */
 MatrixBaseApis.prototype.logout = function(callback) {
     return this._http.authedRequest(
@@ -410,7 +414,7 @@ MatrixBaseApis.prototype.logout = function(callback) {
  * @param {boolean} erase Optional. If set, send as `erase` attribute in the
  * JSON request body, indicating whether the account should be erased. Defaults
  * to false.
- * @return {module:client.Promise} Resolves: On success, the empty object
+ * @return {Promise} Resolves: On success, the empty object
  */
 MatrixBaseApis.prototype.deactivateAccount = function(auth, erase) {
     if (typeof(erase) === 'function') {
@@ -447,7 +451,7 @@ MatrixBaseApis.prototype.getFallbackAuthUrl = function(loginType, authSessionId)
 
     return this._http.getUrl(path, {
         session: authSessionId,
-    }, httpApi.PREFIX_R0);
+    }, PREFIX_R0);
 };
 
 // Room operations
@@ -463,7 +467,7 @@ MatrixBaseApis.prototype.getFallbackAuthUrl = function(loginType, authSessionId)
  * @param {string} options.name The name to give this room.
  * @param {string} options.topic The topic to give this room.
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: <code>{room_id: {string},
+ * @return {Promise} Resolves: <code>{room_id: {string},
  * room_alias: {string(opt)}}</code>
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
@@ -499,7 +503,7 @@ MatrixBaseApis.prototype.fetchRelations =
         });
     const response = await this._http.authedRequest(
         undefined, "GET", path, null, null, {
-            prefix: httpApi.PREFIX_UNSTABLE,
+            prefix: PREFIX_UNSTABLE,
         },
     );
     return response;
@@ -508,7 +512,7 @@ MatrixBaseApis.prototype.fetchRelations =
 /**
  * @param {string} roomId
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.roomState = function(roomId, callback) {
@@ -541,7 +545,7 @@ MatrixBaseApis.prototype.fetchRoomEvent = function(roomId, eventId, callback) {
  * @param {string} excludeMembership the membership type to exclude from the response
  * @param {string} atEventId the id of the event for which moment in the timeline the members should be returned for
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: dictionary of userid to profile information
+ * @return {Promise} Resolves: dictionary of userid to profile information
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.members =
@@ -568,7 +572,7 @@ function(roomId, includeMembership, excludeMembership, atEventId, callback) {
  * Upgrades a room to a new protocol version
  * @param {string} roomId
  * @param {string} newVersion The target version to upgrade to
- * @return {module:client.Promise} Resolves: Object with key 'replacement_room'
+ * @return {Promise} Resolves: Object with key 'replacement_room'
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.upgradeRoom = function(roomId, newVersion) {
@@ -581,7 +585,7 @@ MatrixBaseApis.prototype.upgradeRoom = function(roomId, newVersion) {
 
 /**
  * @param {string} groupId
- * @return {module:client.Promise} Resolves: Group summary object
+ * @return {Promise} Resolves: Group summary object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getGroupSummary = function(groupId) {
@@ -591,7 +595,7 @@ MatrixBaseApis.prototype.getGroupSummary = function(groupId) {
 
 /**
  * @param {string} groupId
- * @return {module:client.Promise} Resolves: Group profile object
+ * @return {Promise} Resolves: Group profile object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getGroupProfile = function(groupId) {
@@ -606,7 +610,7 @@ MatrixBaseApis.prototype.getGroupProfile = function(groupId) {
  * @param {string=} profile.avatar_url MXC avatar URL
  * @param {string=} profile.short_description A short description of the room
  * @param {string=} profile.long_description A longer HTML description of the room
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.setGroupProfile = function(groupId, profile) {
@@ -622,7 +626,7 @@ MatrixBaseApis.prototype.setGroupProfile = function(groupId, profile) {
  *     least a 'type' field which is 'open' if anyone can join the group
  *     the group without prior approval, or 'invite' if an invite is
  *     required to join.
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.setGroupJoinPolicy = function(groupId, policy) {
@@ -639,7 +643,7 @@ MatrixBaseApis.prototype.setGroupJoinPolicy = function(groupId, policy) {
 
 /**
  * @param {string} groupId
- * @return {module:client.Promise} Resolves: Group users list object
+ * @return {Promise} Resolves: Group users list object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getGroupUsers = function(groupId) {
@@ -649,7 +653,7 @@ MatrixBaseApis.prototype.getGroupUsers = function(groupId) {
 
 /**
  * @param {string} groupId
- * @return {module:client.Promise} Resolves: Group users list object
+ * @return {Promise} Resolves: Group users list object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getGroupInvitedUsers = function(groupId) {
@@ -659,7 +663,7 @@ MatrixBaseApis.prototype.getGroupInvitedUsers = function(groupId) {
 
 /**
  * @param {string} groupId
- * @return {module:client.Promise} Resolves: Group rooms list object
+ * @return {Promise} Resolves: Group rooms list object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getGroupRooms = function(groupId) {
@@ -670,7 +674,7 @@ MatrixBaseApis.prototype.getGroupRooms = function(groupId) {
 /**
  * @param {string} groupId
  * @param {string} userId
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.inviteUserToGroup = function(groupId, userId) {
@@ -684,7 +688,7 @@ MatrixBaseApis.prototype.inviteUserToGroup = function(groupId, userId) {
 /**
  * @param {string} groupId
  * @param {string} userId
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.removeUserFromGroup = function(groupId, userId) {
@@ -699,7 +703,7 @@ MatrixBaseApis.prototype.removeUserFromGroup = function(groupId, userId) {
  * @param {string} groupId
  * @param {string} userId
  * @param {string} roleId Optional.
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.addUserToGroupSummary = function(groupId, userId, roleId) {
@@ -715,7 +719,7 @@ MatrixBaseApis.prototype.addUserToGroupSummary = function(groupId, userId, roleI
 /**
  * @param {string} groupId
  * @param {string} userId
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.removeUserFromGroupSummary = function(groupId, userId) {
@@ -730,7 +734,7 @@ MatrixBaseApis.prototype.removeUserFromGroupSummary = function(groupId, userId) 
  * @param {string} groupId
  * @param {string} roomId
  * @param {string} categoryId Optional.
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.addRoomToGroupSummary = function(groupId, roomId, categoryId) {
@@ -746,7 +750,7 @@ MatrixBaseApis.prototype.addRoomToGroupSummary = function(groupId, roomId, categ
 /**
  * @param {string} groupId
  * @param {string} roomId
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.removeRoomFromGroupSummary = function(groupId, roomId) {
@@ -761,7 +765,7 @@ MatrixBaseApis.prototype.removeRoomFromGroupSummary = function(groupId, roomId) 
  * @param {string} groupId
  * @param {string} roomId
  * @param {bool} isPublic Whether the room-group association is visible to non-members
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.addRoomToGroup = function(groupId, roomId, isPublic) {
@@ -782,7 +786,7 @@ MatrixBaseApis.prototype.addRoomToGroup = function(groupId, roomId, isPublic) {
  * @param {string} groupId
  * @param {string} roomId
  * @param {bool} isPublic Whether the room-group association is visible to non-members
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.updateGroupRoomVisibility = function(groupId, roomId, isPublic) {
@@ -802,7 +806,7 @@ MatrixBaseApis.prototype.updateGroupRoomVisibility = function(groupId, roomId, i
 /**
  * @param {string} groupId
  * @param {string} roomId
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.removeRoomFromGroup = function(groupId, roomId) {
@@ -816,7 +820,7 @@ MatrixBaseApis.prototype.removeRoomFromGroup = function(groupId, roomId) {
 /**
  * @param {string} groupId
  * @param {Object} opts Additional options to send alongside the acceptance.
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.acceptGroupInvite = function(groupId, opts = null) {
@@ -829,7 +833,7 @@ MatrixBaseApis.prototype.acceptGroupInvite = function(groupId, opts = null) {
 
 /**
  * @param {string} groupId
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.joinGroup = function(groupId) {
@@ -842,7 +846,7 @@ MatrixBaseApis.prototype.joinGroup = function(groupId) {
 
 /**
  * @param {string} groupId
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.leaveGroup = function(groupId) {
@@ -854,7 +858,7 @@ MatrixBaseApis.prototype.leaveGroup = function(groupId) {
 };
 
 /**
- * @return {module:client.Promise} Resolves: The groups to which the user is joined
+ * @return {Promise} Resolves: The groups to which the user is joined
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getJoinedGroups = function() {
@@ -866,7 +870,7 @@ MatrixBaseApis.prototype.getJoinedGroups = function() {
  * @param {Object} content Request content
  * @param {string} content.localpart The local part of the desired group ID
  * @param {Object} content.profile Group profile object
- * @return {module:client.Promise} Resolves: Object with key group_id: id of the created group
+ * @return {Promise} Resolves: Object with key group_id: id of the created group
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.createGroup = function(content) {
@@ -878,7 +882,7 @@ MatrixBaseApis.prototype.createGroup = function(content) {
 
 /**
  * @param {string[]} userIds List of user IDs
- * @return {module:client.Promise} Resolves: Object as exmaple below
+ * @return {Promise} Resolves: Object as exmaple below
  *
  *     {
  *         "users": {
@@ -899,7 +903,7 @@ MatrixBaseApis.prototype.getPublicisedGroups = function(userIds) {
 /**
  * @param {string} groupId
  * @param {bool} isPublic Whether the user's membership of this group is made public
- * @return {module:client.Promise} Resolves: Empty object
+ * @return {Promise} Resolves: Empty object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.setGroupPublicity = function(groupId, isPublic) {
@@ -918,7 +922,7 @@ MatrixBaseApis.prototype.setGroupPublicity = function(groupId, isPublic) {
  * @param {string} eventType
  * @param {string} stateKey
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getStateEvent = function(roomId, eventType, stateKey, callback) {
@@ -942,7 +946,7 @@ MatrixBaseApis.prototype.getStateEvent = function(roomId, eventType, stateKey, c
  * @param {Object} content
  * @param {string} stateKey
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.sendStateEvent = function(roomId, eventType, content, stateKey,
@@ -965,7 +969,7 @@ MatrixBaseApis.prototype.sendStateEvent = function(roomId, eventType, content, s
  * @param {string} roomId
  * @param {Number} limit
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.roomInitialSync = function(roomId, limit, callback) {
@@ -996,7 +1000,7 @@ MatrixBaseApis.prototype.roomInitialSync = function(roomId, limit, callback) {
  * @param {object} opts Options for the read markers.
  * @param {object} opts.hidden True to hide the read receipt from other users. <b>This
  * property is currently unstable and may change in the future.</b>
- * @return {module:client.Promise} Resolves: the empty object, {}.
+ * @return {Promise} Resolves: the empty object, {}.
  */
 MatrixBaseApis.prototype.setRoomReadMarkersHttpRequest =
                                 function(roomId, rmEventId, rrEventId, opts) {
@@ -1016,7 +1020,7 @@ MatrixBaseApis.prototype.setRoomReadMarkersHttpRequest =
 };
 
 /**
- * @return {module:client.Promise} Resolves: A list of the user's current rooms
+ * @return {Promise} Resolves: A list of the user's current rooms
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getJoinedRooms = function() {
@@ -1027,7 +1031,7 @@ MatrixBaseApis.prototype.getJoinedRooms = function() {
 /**
  * Retrieve membership info. for a room.
  * @param {string} roomId ID of the room to get membership for
- * @return {module:client.Promise} Resolves: A list of currently joined users
+ * @return {Promise} Resolves: A list of currently joined users
  *                                 and their profile data.
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
@@ -1051,7 +1055,7 @@ MatrixBaseApis.prototype.getJoinedRoomMembers = function(roomId) {
  * @param {object} options.filter Filter parameters
  * @param {string} options.filter.generic_search_term String to search for
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.publicRooms = function(options, callback) {
@@ -1083,7 +1087,7 @@ MatrixBaseApis.prototype.publicRooms = function(options, callback) {
  * @param {string} alias The room alias to create.
  * @param {string} roomId The room ID to link the alias to.
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO.
+ * @return {Promise} Resolves: TODO.
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.createAlias = function(alias, roomId, callback) {
@@ -1103,7 +1107,7 @@ MatrixBaseApis.prototype.createAlias = function(alias, roomId, callback) {
  * and you must have sufficient access to do this operation.
  * @param {string} alias The room alias to delete.
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO.
+ * @return {Promise} Resolves: TODO.
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.deleteAlias = function(alias, callback) {
@@ -1116,10 +1120,25 @@ MatrixBaseApis.prototype.deleteAlias = function(alias, callback) {
 };
 
 /**
+ * @param {string} roomId
+ * @param {module:client.callback} callback Optional.
+ * @return {Promise} Resolves: an object with an `aliases` property, containing an array of local aliases
+ * @return {module:http-api.MatrixError} Rejects: with an error response.
+ */
+MatrixBaseApis.prototype.unstableGetLocalAliases =
+function(roomId, callback) {
+    const path = utils.encodeUri("/rooms/$roomId/aliases",
+        {$roomId: roomId});
+    const prefix = PREFIX_UNSTABLE + "/org.matrix.msc2432";
+    return this._http.authedRequest(callback, "GET", path,
+        null, null, { prefix });
+};
+
+/**
  * Get room info for the given alias.
  * @param {string} alias The room alias to resolve.
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: Object with room_id and servers.
+ * @return {Promise} Resolves: Object with room_id and servers.
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getRoomIdForAlias = function(alias, callback) {
@@ -1135,7 +1154,7 @@ MatrixBaseApis.prototype.getRoomIdForAlias = function(alias, callback) {
 /**
  * @param {string} roomAlias
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.resolveRoomAlias = function(roomAlias, callback) {
@@ -1148,7 +1167,7 @@ MatrixBaseApis.prototype.resolveRoomAlias = function(roomAlias, callback) {
  * Get the visibility of a room in the current HS's room directory
  * @param {string} roomId
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getRoomDirectoryVisibility =
@@ -1166,7 +1185,7 @@ MatrixBaseApis.prototype.getRoomDirectoryVisibility =
  *                 in the public directory, or "private" to make
  *                 it invisible.
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: result object
+ * @return {Promise} Resolves: result object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.setRoomDirectoryVisibility =
@@ -1189,7 +1208,7 @@ MatrixBaseApis.prototype.setRoomDirectoryVisibility =
  *                 in the public directory, or "private" to make
  *                 it invisible.
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: result object
+ * @return {Promise} Resolves: result object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.setRoomDirectoryVisibilityAppService =
@@ -1212,7 +1231,7 @@ MatrixBaseApis.prototype.setRoomDirectoryVisibilityAppService =
  * @param {string} opts.term the term with which to search.
  * @param {number} opts.limit the maximum number of results to return. The server will
  *                 apply a limit if unspecified.
- * @return {module:client.Promise} Resolves: an array of results.
+ * @return {Promise} Resolves: an array of results.
  */
 MatrixBaseApis.prototype.searchUserDirectory = function(opts) {
     const body = {
@@ -1268,7 +1287,7 @@ MatrixBaseApis.prototype.searchUserDirectory = function(opts) {
  *    data has been uploaded, with an object containing the fields `loaded`
  *    (number of bytes transferred) and `total` (total size, if known).
  *
- * @return {module:client.Promise} Resolves to response object, as
+ * @return {Promise} Resolves to response object, as
  *    determined by this.opts.onlyData, opts.rawResponse, and
  *    opts.onlyContentUri.  Rejects with an error (usually a MatrixError).
  */
@@ -1278,7 +1297,7 @@ MatrixBaseApis.prototype.uploadContent = function(file, opts) {
 
 /**
  * Cancel a file upload in progress
- * @param {module:client.Promise} promise The promise returned from uploadContent
+ * @param {Promise} promise The promise returned from uploadContent
  * @return {boolean} true if canceled, otherwise false
  */
 MatrixBaseApis.prototype.cancelUpload = function(promise) {
@@ -1306,7 +1325,7 @@ MatrixBaseApis.prototype.getCurrentUploads = function() {
  * @param {string} info The kind of info to retrieve (e.g. 'displayname',
  * 'avatar_url').
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getProfileInfo = function(userId, info, callback) {
@@ -1328,7 +1347,7 @@ MatrixBaseApis.prototype.getProfileInfo = function(userId, info, callback) {
 
 /**
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getThreePids = function(callback) {
@@ -1348,7 +1367,7 @@ MatrixBaseApis.prototype.getThreePids = function(callback) {
  * @param {Object} creds
  * @param {boolean} bind
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: on success
+ * @return {Promise} Resolves: on success
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.addThreePid = function(creds, bind, callback) {
@@ -1371,13 +1390,13 @@ MatrixBaseApis.prototype.addThreePid = function(creds, bind, callback) {
  *
  * @param {Object} data A object with 3PID validation data from having called
  * `account/3pid/<medium>/requestToken` on the homeserver.
- * @return {module:client.Promise} Resolves: on success
+ * @return {Promise} Resolves: on success
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.addThreePidOnly = async function(data) {
     const path = "/account/3pid/add";
     const prefix = await this.isVersionSupported("r0.6.0") ?
-        httpApi.PREFIX_R0 : httpApi.PREFIX_UNSTABLE;
+        PREFIX_R0 : PREFIX_UNSTABLE;
     return this._http.authedRequest(
         undefined, "POST", path, null, data, { prefix },
     );
@@ -1394,13 +1413,13 @@ MatrixBaseApis.prototype.addThreePidOnly = async function(data) {
  * @param {Object} data A object with 3PID validation data from having called
  * `validate/<medium>/requestToken` on the identity server. It should also
  * contain `id_server` and `id_access_token` fields as well.
- * @return {module:client.Promise} Resolves: on success
+ * @return {Promise} Resolves: on success
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.bindThreePid = async function(data) {
     const path = "/account/3pid/bind";
     const prefix = await this.isVersionSupported("r0.6.0") ?
-        httpApi.PREFIX_R0 : httpApi.PREFIX_UNSTABLE;
+        PREFIX_R0 : PREFIX_UNSTABLE;
     return this._http.authedRequest(
         undefined, "POST", path, null, data, { prefix },
     );
@@ -1414,7 +1433,7 @@ MatrixBaseApis.prototype.bindThreePid = async function(data) {
  * @param {string} medium The threepid medium (eg. 'email')
  * @param {string} address The threepid address (eg. 'bob@example.com')
  *        this must be as returned by getThreePids.
- * @return {module:client.Promise} Resolves: on success
+ * @return {Promise} Resolves: on success
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.unbindThreePid = async function(medium, address) {
@@ -1425,7 +1444,7 @@ MatrixBaseApis.prototype.unbindThreePid = async function(medium, address) {
         id_server: this.getIdentityServerUrl(true),
     };
     const prefix = await this.isVersionSupported("r0.6.0") ?
-        httpApi.PREFIX_R0 : httpApi.PREFIX_UNSTABLE;
+        PREFIX_R0 : PREFIX_UNSTABLE;
     return this._http.authedRequest(
         undefined, "POST", path, null, data, { prefix },
     );
@@ -1435,7 +1454,7 @@ MatrixBaseApis.prototype.unbindThreePid = async function(medium, address) {
  * @param {string} medium The threepid medium (eg. 'email')
  * @param {string} address The threepid address (eg. 'bob@example.com')
  *        this must be as returned by getThreePids.
- * @return {module:client.Promise} Resolves: The server response on success
+ * @return {Promise} Resolves: The server response on success
  *     (generally the empty JSON object)
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
@@ -1453,7 +1472,7 @@ MatrixBaseApis.prototype.deleteThreePid = function(medium, address) {
  * @param {Object} authDict
  * @param {string} newPassword The new desired password.
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.setPassword = function(authDict, newPassword, callback) {
@@ -1474,7 +1493,7 @@ MatrixBaseApis.prototype.setPassword = function(authDict, newPassword, callback)
 
 /**
  * Gets all devices recorded for the logged-in user
- * @return {module:client.Promise} Resolves: result object
+ * @return {Promise} Resolves: result object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getDevices = function() {
@@ -1488,7 +1507,7 @@ MatrixBaseApis.prototype.getDevices = function() {
  *
  * @param {string} device_id  device to update
  * @param {Object} body       body of request
- * @return {module:client.Promise} Resolves: result object
+ * @return {Promise} Resolves: result object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.setDeviceDetails = function(device_id, body) {
@@ -1504,7 +1523,7 @@ MatrixBaseApis.prototype.setDeviceDetails = function(device_id, body) {
  *
  * @param {string} device_id  device to delete
  * @param {object} auth Optional. Auth data to supply for User-Interactive auth.
- * @return {module:client.Promise} Resolves: result object
+ * @return {Promise} Resolves: result object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.deleteDevice = function(device_id, auth) {
@@ -1526,7 +1545,7 @@ MatrixBaseApis.prototype.deleteDevice = function(device_id, auth) {
  *
  * @param {string[]} devices IDs of the devices to delete
  * @param {object} auth Optional. Auth data to supply for User-Interactive auth.
- * @return {module:client.Promise} Resolves: result object
+ * @return {Promise} Resolves: result object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.deleteMultipleDevices = function(devices, auth) {
@@ -1548,7 +1567,7 @@ MatrixBaseApis.prototype.deleteMultipleDevices = function(devices, auth) {
  * Gets all pushers registered for the logged-in user
  *
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: Array of objects representing pushers
+ * @return {Promise} Resolves: Array of objects representing pushers
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getPushers = function(callback) {
@@ -1563,7 +1582,7 @@ MatrixBaseApis.prototype.getPushers = function(callback) {
  *
  * @param {Object} pusher Object representing a pusher
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: Empty json object on success
+ * @return {Promise} Resolves: Empty json object on success
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.setPusher = function(pusher, callback) {
@@ -1575,7 +1594,7 @@ MatrixBaseApis.prototype.setPusher = function(pusher, callback) {
 
 /**
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getPushRules = function(callback) {
@@ -1590,7 +1609,7 @@ MatrixBaseApis.prototype.getPushRules = function(callback) {
  * @param {string} ruleId
  * @param {Object} body
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.addPushRule = function(scope, kind, ruleId, body, callback) {
@@ -1609,7 +1628,7 @@ MatrixBaseApis.prototype.addPushRule = function(scope, kind, ruleId, body, callb
  * @param {string} kind
  * @param {string} ruleId
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.deletePushRule = function(scope, kind, ruleId, callback) {
@@ -1628,7 +1647,7 @@ MatrixBaseApis.prototype.deletePushRule = function(scope, kind, ruleId, callback
  * @param {string} ruleId
  * @param {boolean} enabled
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: result object
+ * @return {Promise} Resolves: result object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.setPushRuleEnabled = function(scope, kind,
@@ -1649,7 +1668,7 @@ MatrixBaseApis.prototype.setPushRuleEnabled = function(scope, kind,
  * @param {string} ruleId
  * @param {array} actions
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: result object
+ * @return {Promise} Resolves: result object
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.setPushRuleActions = function(scope, kind,
@@ -1673,7 +1692,7 @@ MatrixBaseApis.prototype.setPushRuleActions = function(scope, kind,
  * @param {string} opts.next_batch the batch token to pass in the query string
  * @param {Object} opts.body the JSON object to pass to the request body.
  * @param {module:client.callback} callback Optional.
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.search = function(opts, callback) {
@@ -1694,35 +1713,23 @@ MatrixBaseApis.prototype.search = function(opts, callback) {
  *
  * @param {Object} content  body of upload request
  *
- * @param {Object=} opts
- *
- * @param {string=} opts.device_id  explicit device_id to use for upload
- *    (default is to use the same as that used during auth).
+ * @param {Object=} opts this method no longer takes any opts,
+ *  used to take opts.device_id but this was not removed from the spec as a redundant parameter
  *
  * @param {module:client.callback=} callback
  *
- * @return {module:client.Promise} Resolves: result object. Rejects: with
+ * @return {Promise} Resolves: result object. Rejects: with
  *     an error response ({@link module:http-api.MatrixError}).
  */
 MatrixBaseApis.prototype.uploadKeysRequest = function(content, opts, callback) {
-    opts = opts || {};
-    const deviceId = opts.device_id;
-    let path;
-    if (deviceId) {
-        path = utils.encodeUri("/keys/upload/$deviceId", {
-            $deviceId: deviceId,
-        });
-    } else {
-        path = "/keys/upload";
-    }
-    return this._http.authedRequest(callback, "POST", path, undefined, content);
+    return this._http.authedRequest(callback, "POST", "/keys/upload", undefined, content);
 };
 
 MatrixBaseApis.prototype.uploadKeySignatures = function(content) {
     return this._http.authedRequest(
         undefined, "POST", '/keys/signatures/upload', undefined,
         content, {
-            prefix: httpApi.PREFIX_UNSTABLE,
+            prefix: PREFIX_UNSTABLE,
         },
     );
 };
@@ -1737,7 +1744,7 @@ MatrixBaseApis.prototype.uploadKeySignatures = function(content) {
  * @param {string=} opts.token   sync token to pass in the query request, to help
  *   the HS give the most recent results
  *
- * @return {module:client.Promise} Resolves: result object. Rejects: with
+ * @return {Promise} Resolves: result object. Rejects: with
  *     an error response ({@link module:http-api.MatrixError}).
  */
 MatrixBaseApis.prototype.downloadKeysForUsers = function(userIds, opts) {
@@ -1769,7 +1776,7 @@ MatrixBaseApis.prototype.downloadKeysForUsers = function(userIds, opts) {
  *
  * @param {string} [key_algorithm = signed_curve25519]  desired key type
  *
- * @return {module:client.Promise} Resolves: result object. Rejects: with
+ * @return {Promise} Resolves: result object. Rejects: with
  *     an error response ({@link module:http-api.MatrixError}).
  */
 MatrixBaseApis.prototype.claimOneTimeKeys = function(devices, key_algorithm) {
@@ -1798,7 +1805,7 @@ MatrixBaseApis.prototype.claimOneTimeKeys = function(devices, key_algorithm) {
  * @param {string} oldToken
  * @param {string} newToken
  *
- * @return {module:client.Promise} Resolves: result object. Rejects: with
+ * @return {Promise} Resolves: result object. Rejects: with
  *     an error response ({@link module:http-api.MatrixError}).
  */
 MatrixBaseApis.prototype.getKeyChanges = function(oldToken, newToken) {
@@ -1812,10 +1819,11 @@ MatrixBaseApis.prototype.getKeyChanges = function(oldToken, newToken) {
 };
 
 MatrixBaseApis.prototype.uploadDeviceSigningKeys = function(auth, keys) {
-    const data = Object.assign({}, keys, {auth});
+    const data = Object.assign({}, keys);
+    if (auth) Object.assign(data, {auth});
     return this._http.authedRequest(
         undefined, "POST", "/keys/device_signing/upload", undefined, data, {
-            prefix: httpApi.PREFIX_UNSTABLE,
+            prefix: PREFIX_UNSTABLE,
         },
     );
 };
@@ -1832,7 +1840,7 @@ MatrixBaseApis.prototype.uploadDeviceSigningKeys = function(auth, keys) {
  * general) was added as part of the v2 API version.
  *
  * @param {object} hsOpenIdToken
- * @return {module:client.Promise} Resolves: with object containing an Identity
+ * @return {Promise} Resolves: with object containing an Identity
  * Server access token.
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
@@ -1841,7 +1849,7 @@ MatrixBaseApis.prototype.registerWithIdentityServer = function(hsOpenIdToken) {
         throw new Error("No Identity Server base URL set");
     }
 
-    const uri = this.idBaseUrl + httpApi.PREFIX_IDENTITY_V2 + "/account/register";
+    const uri = this.idBaseUrl + PREFIX_IDENTITY_V2 + "/account/register";
     return this._http.requestOtherUrl(
         undefined, "POST", uri,
         null, hsOpenIdToken,
@@ -1868,7 +1876,7 @@ MatrixBaseApis.prototype.registerWithIdentityServer = function(hsOpenIdToken) {
  * @param {string} identityAccessToken The `access_token` field of the identity
  * server `/account/register` response (see {@link registerWithIdentityServer}).
  *
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  * @throws Error if no identity server is set
  */
@@ -1890,7 +1898,7 @@ MatrixBaseApis.prototype.requestEmailToken = async function(
     try {
         const response = await this._http.idServerRequest(
             undefined, "POST", "/validate/email/requestToken",
-            params, httpApi.PREFIX_IDENTITY_V2, identityAccessToken,
+            params, PREFIX_IDENTITY_V2, identityAccessToken,
         );
         // TODO: Fold callback into above call once v1 path below is removed
         if (callback) callback(null, response);
@@ -1903,7 +1911,7 @@ MatrixBaseApis.prototype.requestEmailToken = async function(
             logger.warn("IS doesn't support v2, falling back to deprecated v1");
             return await this._http.idServerRequest(
                 callback, "POST", "/validate/email/requestToken",
-                params, httpApi.PREFIX_IDENTITY_V1,
+                params, PREFIX_IDENTITY_V1,
             );
         }
         if (callback) callback(err);
@@ -1934,7 +1942,7 @@ MatrixBaseApis.prototype.requestEmailToken = async function(
  * @param {string} identityAccessToken The `access_token` field of the Identity
  * Server `/account/register` response (see {@link registerWithIdentityServer}).
  *
- * @return {module:client.Promise} Resolves: TODO
+ * @return {Promise} Resolves: TODO
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  * @throws Error if no identity server is set
  */
@@ -1958,7 +1966,7 @@ MatrixBaseApis.prototype.requestMsisdnToken = async function(
     try {
         const response = await this._http.idServerRequest(
             undefined, "POST", "/validate/msisdn/requestToken",
-            params, httpApi.PREFIX_IDENTITY_V2, identityAccessToken,
+            params, PREFIX_IDENTITY_V2, identityAccessToken,
         );
         // TODO: Fold callback into above call once v1 path below is removed
         if (callback) callback(null, response);
@@ -1971,7 +1979,7 @@ MatrixBaseApis.prototype.requestMsisdnToken = async function(
             logger.warn("IS doesn't support v2, falling back to deprecated v1");
             return await this._http.idServerRequest(
                 callback, "POST", "/validate/msisdn/requestToken",
-                params, httpApi.PREFIX_IDENTITY_V1,
+                params, PREFIX_IDENTITY_V1,
             );
         }
         if (callback) callback(err);
@@ -1994,7 +2002,7 @@ MatrixBaseApis.prototype.requestMsisdnToken = async function(
  * @param {string} identityAccessToken The `access_token` field of the Identity
  * Server `/account/register` response (see {@link registerWithIdentityServer}).
  *
- * @return {module:client.Promise} Resolves: Object, currently with no parameters.
+ * @return {Promise} Resolves: Object, currently with no parameters.
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  * @throws Error if No ID server is set
  */
@@ -2013,7 +2021,7 @@ MatrixBaseApis.prototype.submitMsisdnToken = async function(
     try {
         return await this._http.idServerRequest(
             undefined, "POST", "/validate/msisdn/submitToken",
-            params, httpApi.PREFIX_IDENTITY_V2, identityAccessToken,
+            params, PREFIX_IDENTITY_V2, identityAccessToken,
         );
     } catch (err) {
         if (err.cors === "rejected" || err.httpStatus === 404) {
@@ -2023,7 +2031,7 @@ MatrixBaseApis.prototype.submitMsisdnToken = async function(
             logger.warn("IS doesn't support v2, falling back to deprecated v1");
             return await this._http.idServerRequest(
                 undefined, "POST", "/validate/msisdn/submitToken",
-                params, httpApi.PREFIX_IDENTITY_V1,
+                params, PREFIX_IDENTITY_V1,
             );
         }
         throw err;
@@ -2045,7 +2053,7 @@ MatrixBaseApis.prototype.submitMsisdnToken = async function(
  *                 This must be the same value submitted in the requestToken call.
  * @param {string} msisdnToken The MSISDN token, as enetered by the user.
  *
- * @return {module:client.Promise} Resolves: Object, currently with no parameters.
+ * @return {Promise} Resolves: Object, currently with no parameters.
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.submitMsisdnTokenOtherUrl = function(
@@ -2074,7 +2082,7 @@ MatrixBaseApis.prototype.submitMsisdnTokenOtherUrl = function(
 MatrixBaseApis.prototype.getIdentityHashDetails = function(identityAccessToken) {
     return this._http.idServerRequest(
         undefined, "GET", "/hash_details",
-        null, httpApi.PREFIX_IDENTITY_V2, identityAccessToken,
+        null, PREFIX_IDENTITY_V2, identityAccessToken,
     );
 };
 
@@ -2143,7 +2151,7 @@ MatrixBaseApis.prototype.identityHashedLookup = async function(
 
     const response = await this._http.idServerRequest(
         undefined, "POST", "/lookup",
-        params, httpApi.PREFIX_IDENTITY_V2, identityAccessToken,
+        params, PREFIX_IDENTITY_V2, identityAccessToken,
     );
 
     if (!response || !response['mappings']) return []; // no results
@@ -2171,7 +2179,7 @@ MatrixBaseApis.prototype.identityHashedLookup = async function(
  * @param {string} identityAccessToken The `access_token` field of the Identity
  * Server `/account/register` response (see {@link registerWithIdentityServer}).
  *
- * @return {module:client.Promise} Resolves: A threepid mapping
+ * @return {Promise} Resolves: A threepid mapping
  *                                 object or the empty object if no mapping
  *                                 exists
  * @return {module:http-api.MatrixError} Rejects: with an error response.
@@ -2223,7 +2231,7 @@ MatrixBaseApis.prototype.lookupThreePid = async function(
             logger.warn("IS doesn't support v2, falling back to deprecated v1");
             return await this._http.idServerRequest(
                 callback, "GET", "/lookup",
-                params, httpApi.PREFIX_IDENTITY_V1,
+                params, PREFIX_IDENTITY_V1,
             );
         }
         if (callback) callback(err, undefined);
@@ -2239,7 +2247,7 @@ MatrixBaseApis.prototype.lookupThreePid = async function(
  * @param {string} identityAccessToken The `access_token` field of the Identity
  * Server `/account/register` response (see {@link registerWithIdentityServer}).
  *
- * @return {module:client.Promise} Resolves: Lookup results from IS.
+ * @return {Promise} Resolves: Lookup results from IS.
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.bulkLookupThreePids = async function(
@@ -2281,7 +2289,7 @@ MatrixBaseApis.prototype.bulkLookupThreePids = async function(
             logger.warn("IS doesn't support v2, falling back to deprecated v1");
             return await this._http.idServerRequest(
                 undefined, "POST", "/bulk_lookup", params,
-                httpApi.PREFIX_IDENTITY_V1, identityAccessToken,
+                PREFIX_IDENTITY_V1, identityAccessToken,
             );
         }
         throw err;
@@ -2296,7 +2304,7 @@ MatrixBaseApis.prototype.bulkLookupThreePids = async function(
  * @param {string} identityAccessToken The `access_token` field of the Identity
  * Server `/account/register` response (see {@link registerWithIdentityServer}).
  *
- * @return {module:client.Promise} Resolves: an object with account info.
+ * @return {Promise} Resolves: an object with account info.
  * @return {module:http-api.MatrixError} Rejects: with an error response.
  */
 MatrixBaseApis.prototype.getIdentityAccount = function(
@@ -2304,7 +2312,7 @@ MatrixBaseApis.prototype.getIdentityAccount = function(
 ) {
     return this._http.idServerRequest(
         undefined, "GET", "/account",
-        undefined, httpApi.PREFIX_IDENTITY_V2, identityAccessToken,
+        undefined, PREFIX_IDENTITY_V2, identityAccessToken,
     );
 };
 
@@ -2319,7 +2327,7 @@ MatrixBaseApis.prototype.getIdentityAccount = function(
  *    content to send. Map from user_id to device_id to content object.
  * @param {string=} txnId     transaction id. One will be made up if not
  *    supplied.
- * @return {module:client.Promise} Resolves to the result object
+ * @return {Promise} Resolves to the result object
  */
 MatrixBaseApis.prototype.sendToDevice = function(
     eventType, contentMap, txnId,
@@ -2348,7 +2356,7 @@ MatrixBaseApis.prototype.sendToDevice = function(
 /**
  * Get the third party protocols that can be reached using
  * this HS
- * @return {module:client.Promise} Resolves to the result object
+ * @return {Promise} Resolves to the result object
  */
 MatrixBaseApis.prototype.getThirdpartyProtocols = function() {
     return this._http.authedRequest(
@@ -2370,7 +2378,7 @@ MatrixBaseApis.prototype.getThirdpartyProtocols = function() {
  * @param {string} protocol The protocol given in getThirdpartyProtocols()
  * @param {object} params Protocol-specific parameters, as given in the
  *                        response to getThirdpartyProtocols()
- * @return {module:client.Promise} Resolves to the result object
+ * @return {Promise} Resolves to the result object
  */
 MatrixBaseApis.prototype.getThirdpartyLocation = function(protocol, params) {
     const path = utils.encodeUri("/thirdparty/location/$protocol", {
@@ -2386,7 +2394,7 @@ MatrixBaseApis.prototype.getThirdpartyLocation = function(protocol, params) {
  * @param {string} protocol The protocol given in getThirdpartyProtocols()
  * @param {object} params Protocol-specific parameters, as given in the
  *                        response to getThirdpartyProtocols()
- * @return {module:client.Promise} Resolves to the result object
+ * @return {Promise} Resolves to the result object
  */
 MatrixBaseApis.prototype.getThirdpartyUser = function(protocol, params) {
     const path = utils.encodeUri("/thirdparty/user/$protocol", {
@@ -2421,7 +2429,7 @@ MatrixBaseApis.prototype.agreeToTerms = function(
  * @param {string} eventId The event to report.
  * @param {number} score The score to rate this content as where -100 is most offensive and 0 is inoffensive.
  * @param {string} reason The reason the content is being reported. May be blank.
- * @returns {module:client.Promise} Resolves to an empty object if successful
+ * @returns {Promise} Resolves to an empty object if successful
  */
 MatrixBaseApis.prototype.reportEvent = function(roomId, eventId, score, reason) {
     const path = utils.encodeUri("/rooms/$roomId/report/$eventId", {
@@ -2432,7 +2440,3 @@ MatrixBaseApis.prototype.reportEvent = function(roomId, eventId, score, reason) 
     return this._http.authedRequest(undefined, "POST", path, null, {score, reason});
 };
 
-/**
- * MatrixBaseApis object
- */
-module.exports = MatrixBaseApis;

@@ -21,13 +21,20 @@ limitations under the License.
 
 import {MatrixEvent} from '../../models/event';
 import {EventEmitter} from 'events';
-import logger from '../../logger';
-import DeviceInfo from '../deviceinfo';
+import {logger} from '../../logger';
+import {DeviceInfo} from '../deviceinfo';
 import {newTimeoutError} from "./Error";
 
 const timeoutException = new Error("Verification timed out");
 
-export default class VerificationBase extends EventEmitter {
+export class SwitchStartEventError extends Error {
+    constructor(startEvent) {
+        super();
+        this.startEvent = startEvent;
+    }
+}
+
+export class VerificationBase extends EventEmitter {
     /**
      * Base class for verification methods.
      *
@@ -67,9 +74,19 @@ export default class VerificationBase extends EventEmitter {
         this._done = false;
         this._promise = null;
         this._transactionTimeoutTimer = null;
+    }
 
-        // At this point, the verification request was received so start the timeout timer.
-        this._resetTimer();
+    get initiatedByMe() {
+        // if there is no start event yet,
+        // we probably want to send it,
+        // which happens if we initiate
+        if (!this.startEvent) {
+            return true;
+        }
+        const sender = this.startEvent.getSender();
+        const content = this.startEvent.getContent();
+        return sender === this._baseApis.getUserId() &&
+            content.from_device === this._baseApis.getDeviceId();
     }
 
     _resetTimer() {
@@ -107,6 +124,24 @@ export default class VerificationBase extends EventEmitter {
         });
     }
 
+    canSwitchStartEvent() {
+        return false;
+    }
+
+    switchStartEvent(event) {
+        if (this.canSwitchStartEvent(event)) {
+            logger.log("Verification Base: switching verification start event",
+                {restartingFlow: !!this._rejectEvent});
+            if (this._rejectEvent) {
+                const reject = this._rejectEvent;
+                this._rejectEvent = undefined;
+                reject(new SwitchStartEventError(event));
+            } else {
+                this.startEvent = event;
+            }
+        }
+    }
+
     handleEvent(e) {
         if (this._done) {
             return;
@@ -122,8 +157,18 @@ export default class VerificationBase extends EventEmitter {
         } else if (e.getType() === "m.key.verification.cancel") {
             const reject = this._reject;
             this._reject = undefined;
-            reject(new Error("Other side cancelled verification"));
-        } else {
+            // there is only promise to reject if verify has been called
+            if (reject) {
+                const content = e.getContent();
+                const {reason, code} = content;
+                reject(new Error(`Other side cancelled verification ` +
+                    `because ${reason} (${code})`));
+            }
+        } else if (this._expectedEvent) {
+            // only cancel if there is an event expected.
+            // if there is no event expected, it means verify() wasn't called
+            // and we're just replaying the timeline events when syncing
+            // after a refresh when the events haven't been stored in the cache yet.
             const exception = new Error(
                 "Unexpected message: expecting " + this._expectedEvent
                     + " but got " + e.getType(),
@@ -141,10 +186,7 @@ export default class VerificationBase extends EventEmitter {
     done() {
         this._endTimer(); // always kill the activity timer
         if (!this._done) {
-            if (this._channel.needsDoneMessage) {
-                // verification in DM requires a done message
-                this._send("m.key.verification.done", {});
-            }
+            this.request.onVerifierFinished();
             this._resolve();
         }
     }
@@ -263,6 +305,13 @@ export default class VerificationBase extends EventEmitter {
             throw new Error("No devices could be verified");
         }
 
+        logger.info(
+            "Verification completed! Marking devices verified: ",
+            verifiedDevices,
+        );
+        // TODO: There should probably be a batch version of this, otherwise it's going
+        // to upload each signature in a separate API call which is silly because the
+        // API supports as many signatures as you like.
         for (const deviceId of verifiedDevices) {
             await this._baseApis.setDeviceVerified(userId, deviceId);
         }

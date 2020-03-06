@@ -1,5 +1,6 @@
 /*
 Copyright 2019 New Vector Ltd
+Copyright 2019 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,10 +15,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import TestClient from '../../../TestClient';
-
-import sdk from '../../../..';
-const MatrixEvent = sdk.MatrixEvent;
+import {TestClient} from '../../../TestClient';
+import {MatrixEvent} from "../../../../src/models/event";
+import nodeCrypto from "crypto";
 
 export async function makeTestClients(userInfos, options) {
     const clients = [];
@@ -34,15 +34,13 @@ export async function makeTestClients(userInfos, options) {
                             content: msg,
                         });
                         const client = clientMap[userId][deviceId];
-                        if (event.isEncrypted()) {
-                            event.attemptDecryption(client._crypto)
-                                .then(() => client.emit("toDeviceEvent", event));
-                        } else {
-                            setTimeout(
-                                () => client.emit("toDeviceEvent", event),
-                                0,
-                            );
-                        }
+                        const decryptionPromise = event.isEncrypted() ?
+                            event.attemptDecryption(client._crypto) :
+                            Promise.resolve();
+
+                        decryptionPromise.then(
+                            () => client.emit("toDeviceEvent", event),
+                        );
                     }
                 }
             }
@@ -51,21 +49,33 @@ export async function makeTestClients(userInfos, options) {
     const sendEvent = function(room, type, content) {
         // make up a unique ID as the event ID
         const eventId = "$" + this.makeTxnId(); // eslint-disable-line babel/no-invalid-this
-        const event = new MatrixEvent({
+        const rawEvent = {
             sender: this.getUserId(), // eslint-disable-line babel/no-invalid-this
             type: type,
             content: content,
             room_id: room,
             event_id: eventId,
-        });
-        for (const tc of clients) {
-            setTimeout(
-                () => tc.client.emit("Room.timeline", event),
-                0,
-            );
-        }
+            origin_server_ts: Date.now(),
+        };
+        const event = new MatrixEvent(rawEvent);
+        const remoteEcho = new MatrixEvent(Object.assign({}, rawEvent, {
+            unsigned: {
+                transaction_id: this.makeTxnId(), // eslint-disable-line babel/no-invalid-this
+            },
+        }));
 
-        return {event_id: eventId};
+        setImmediate(() => {
+            for (const tc of clients) {
+                if (tc.client === this) { // eslint-disable-line babel/no-invalid-this
+                    console.log("sending remote echo!!");
+                    tc.client.emit("Room.timeline", remoteEcho);
+                } else {
+                    tc.client.emit("Room.timeline", event);
+                }
+            }
+        });
+
+        return Promise.resolve({event_id: eventId});
     };
 
     for (const userInfo of userInfos) {
@@ -92,4 +102,16 @@ export async function makeTestClients(userInfos, options) {
     await Promise.all(clients.map((testClient) => testClient.client.initCrypto()));
 
     return clients;
+}
+
+export function setupWebcrypto() {
+    global.crypto = {
+        getRandomValues: (buf) => {
+            return nodeCrypto.randomFillSync(buf);
+        },
+    };
+}
+
+export function teardownWebcrypto() {
+    global.crypto = undefined;
 }

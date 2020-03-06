@@ -16,13 +16,9 @@ limitations under the License.
 */
 
 import '../../olm-loader';
-
 import anotherjson from 'another-json';
-
-import olmlib from '../../../lib/crypto/olmlib';
-
-import TestClient from '../../TestClient';
-
+import * as olmlib from "../../../src/crypto/olmlib";
+import {TestClient} from '../../TestClient';
 import {HttpResponse, setHttpResponses} from '../../test-utils';
 
 async function makeTestClient(userInfo, options, keys) {
@@ -178,7 +174,7 @@ describe("Cross Signing", function() {
             HttpResponse.PUSH_RULES_RESPONSE,
             {
                 method: "POST",
-                path: "/keys/upload/Osborne2",
+                path: "/keys/upload",
                 data: {
                     one_time_key_counts: {
                         curve25519: 100,
@@ -241,7 +237,7 @@ describe("Cross Signing", function() {
             },
             {
                 method: "POST",
-                path: "/keys/upload/Osborne2",
+                path: "/keys/upload",
                 data: {
                     one_time_key_counts: {
                         curve25519: 100,
@@ -433,7 +429,7 @@ describe("Cross Signing", function() {
             HttpResponse.PUSH_RULES_RESPONSE,
             {
                 method: "POST",
-                path: "/keys/upload/Osborne2",
+                path: "/keys/upload",
                 data: {
                     one_time_key_counts: {
                         curve25519: 100,
@@ -491,7 +487,7 @@ describe("Cross Signing", function() {
             },
             {
                 method: "POST",
-                path: "/keys/upload/Osborne2",
+                path: "/keys/upload",
                 data: {
                     one_time_key_counts: {
                         curve25519: 100,

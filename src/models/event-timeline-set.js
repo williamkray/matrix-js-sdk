@@ -1,5 +1,6 @@
 /*
 Copyright 2016 OpenMarket Ltd
+Copyright 2019 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,16 +14,17 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-"use strict";
+
 /**
  * @module models/event-timeline-set
  */
-const EventEmitter = require("events").EventEmitter;
-const utils = require("../utils");
-const EventTimeline = require("./event-timeline");
+
+import {EventEmitter} from "events";
+import {EventTimeline} from "./event-timeline";
 import {EventStatus} from "./event";
-import logger from '../logger';
-import Relations from './relations';
+import * as utils from "../utils";
+import {logger} from '../logger';
+import {Relations} from './relations';
 
 // var DEBUG = false;
 const DEBUG = true;
@@ -71,7 +73,7 @@ if (DEBUG) {
  * via `getRelationsForEvent`.
  * This feature is currently unstable and the API may change without notice.
  */
-function EventTimelineSet(room, opts) {
+export function EventTimelineSet(room, opts) {
     this.room = room;
 
     this._timelineSupport = Boolean(opts.timelineSupport);
@@ -488,8 +490,9 @@ EventTimelineSet.prototype.addEventsToTimeline = function(events, toStartOfTimel
  *
  * @param {MatrixEvent} event Event to be added
  * @param {string?} duplicateStrategy 'ignore' or 'replace'
+ * @param {boolean} fromCache whether the sync response came from cache
  */
-EventTimelineSet.prototype.addLiveEvent = function(event, duplicateStrategy) {
+EventTimelineSet.prototype.addLiveEvent = function(event, duplicateStrategy, fromCache) {
     if (this._filter) {
         const events = this._filter.filterRoomTimeline([event]);
         if (!events.length) {
@@ -527,7 +530,7 @@ EventTimelineSet.prototype.addLiveEvent = function(event, duplicateStrategy) {
         return;
     }
 
-    this.addEventToTimeline(event, this._liveTimeline, false);
+    this.addEventToTimeline(event, this._liveTimeline, false, fromCache);
 };
 
 /**
@@ -539,11 +542,12 @@ EventTimelineSet.prototype.addLiveEvent = function(event, duplicateStrategy) {
  * @param {MatrixEvent} event
  * @param {EventTimeline} timeline
  * @param {boolean} toStartOfTimeline
+ * @param {boolean} fromCache whether the sync response came from cache
  *
  * @fires module:client~MatrixClient#event:"Room.timeline"
  */
 EventTimelineSet.prototype.addEventToTimeline = function(event, timeline,
-                                                         toStartOfTimeline) {
+                                                         toStartOfTimeline, fromCache) {
     const eventId = event.getId();
     timeline.addEvent(event, toStartOfTimeline);
     this._eventIdToTimeline[eventId] = timeline;
@@ -553,7 +557,7 @@ EventTimelineSet.prototype.addEventToTimeline = function(event, timeline,
 
     const data = {
         timeline: timeline,
-        liveEvent: !toStartOfTimeline && timeline == this._liveTimeline,
+        liveEvent: !toStartOfTimeline && timeline == this._liveTimeline && !fromCache,
     };
     this.emit("Room.timeline", event, this.room,
               Boolean(toStartOfTimeline), false, data);
@@ -816,11 +820,6 @@ EventTimelineSet.prototype.aggregateRelations = function(event) {
 };
 
 /**
- * The EventTimelineSet class.
- */
-module.exports = EventTimelineSet;
-
-/**
  * Fires whenever the timeline in a room is updated.
  * @event module:client~MatrixClient#"Room.timeline"
  * @param {MatrixEvent} event The matrix event which caused this event to fire.
@@ -831,7 +830,7 @@ module.exports = EventTimelineSet;
  *
  * @param {object} data  more data about the event
  *
- * @param {module:event-timeline.EventTimeline} data.timeline the timeline the
+ * @param {module:models/event-timeline.EventTimeline} data.timeline the timeline the
  * event was added to/removed from
  *
  * @param {boolean} data.liveEvent true if the event was a real-time event

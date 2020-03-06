@@ -15,15 +15,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import logger from '../../../logger';
-import RequestCallbackChannel from "./RequestCallbackChannel";
+import {logger} from '../../../logger';
 import {EventEmitter} from 'events';
 import {
-    newUnknownMethodError,
-    newUnexpectedMessageError,
-    errorFromEvent,
     errorFactory,
+    errorFromEvent,
+    newUnexpectedMessageError,
+    newUnknownMethodError,
 } from "../Error";
+import * as olmlib from "../../olmlib";
 
 // the recommended amount of time before a verification request
 // should be (automatically) cancelled without user interaction
@@ -41,11 +41,11 @@ export const REQUEST_TYPE = EVENT_PREFIX + "request";
 export const START_TYPE = EVENT_PREFIX + "start";
 export const CANCEL_TYPE = EVENT_PREFIX + "cancel";
 export const DONE_TYPE = EVENT_PREFIX + "done";
-// export const READY_TYPE = EVENT_PREFIX + "ready";
+export const READY_TYPE = EVENT_PREFIX + "ready";
 
 export const PHASE_UNSENT = 1;
 export const PHASE_REQUESTED = 2;
-// const PHASE_READY = 3;
+export const PHASE_READY = 3;
 export const PHASE_STARTED = 4;
 export const PHASE_CANCELLED = 5;
 export const PHASE_DONE = 6;
@@ -57,18 +57,23 @@ export const PHASE_DONE = 6;
  * send and receive verification events are put in `InRoomChannel` or `ToDeviceChannel`.
  * @event "change" whenever the state of the request object has changed.
  */
-export default class VerificationRequest extends EventEmitter {
-    constructor(channel, verificationMethods, userId, client) {
+export class VerificationRequest extends EventEmitter {
+    constructor(channel, verificationMethods, client) {
         super();
         this.channel = channel;
+        this.channel._request = this;
         this._verificationMethods = verificationMethods;
         this._client = client;
         this._commonMethods = [];
         this._setPhase(PHASE_UNSENT, false);
-        this._requestEvent = null;
-        this._otherUserId = userId;
-        this._initiatedByMe = null;
-        this._startTimestamp = null;
+        this._eventsByUs = new Map();
+        this._eventsByThem = new Map();
+        this._observeOnly = false;
+        this._timeoutTimer = null;
+        this._sharedSecret = null; // used for QR codes
+        this._accepting = false;
+        this._declining = false;
+        this._verifierHasFinished = false;
     }
 
     /**
@@ -76,37 +81,38 @@ export default class VerificationRequest extends EventEmitter {
      * Invoked by the same static method in either channel.
      * @param {string} type the "symbolic" event type, as returned by the `getEventType` function on the channel.
      * @param {MatrixEvent} event the event to validate. Don't call getType() on it but use the `type` parameter instead.
-     * @param {number} timestamp the timestamp in milliseconds when this event was sent.
      * @param {MatrixClient} client the client to get the current user and device id from
      * @returns {bool} whether the event is valid and should be passed to handleEvent
      */
-    static validateEvent(type, event, timestamp, client) {
+    static validateEvent(type, event, client) {
         const content = event.getContent();
 
-        if (!type.startsWith(EVENT_PREFIX)) {
+
+        if (!type || !type.startsWith(EVENT_PREFIX)) {
             return false;
         }
 
-        if (type === REQUEST_TYPE) {
-            if (!Array.isArray(content.methods)) {
-                return false;
-            }
+        // from here on we're fairly sure that this is supposed to be
+        // part of a verification request, so be noisy when rejecting something
+        if (!content) {
+            logger.log("VerificationRequest: validateEvent: no content");
+            return false;
         }
-        if (type === REQUEST_TYPE || type === START_TYPE) {
-            if (typeof content.from_device !== "string" ||
-                content.from_device.length === 0
-            ) {
+
+        if (type === REQUEST_TYPE || type === READY_TYPE) {
+            if (!Array.isArray(content.methods)) {
+                logger.log("VerificationRequest: validateEvent: " +
+                    "fail because methods");
                 return false;
             }
         }
 
-        // a timestamp is not provided on all to_device events
-        if (Number.isFinite(timestamp)) {
-            const elapsed = Date.now() - timestamp;
-            // ignore if event is too far in the past or too far in the future
-            if (elapsed > (VERIFICATION_REQUEST_TIMEOUT - VERIFICATION_REQUEST_MARGIN) ||
-                elapsed < -(VERIFICATION_REQUEST_TIMEOUT / 2)) {
-                logger.log("received verification that is too old or from the future");
+        if (type === REQUEST_TYPE || type === READY_TYPE || type === START_TYPE) {
+            if (typeof content.from_device !== "string" ||
+                content.from_device.length === 0
+            ) {
+                logger.log("VerificationRequest: validateEvent: "+
+                    "fail because from_device");
                 return false;
             }
         }
@@ -114,20 +120,56 @@ export default class VerificationRequest extends EventEmitter {
         return true;
     }
 
-    /** once the phase is PHASE_STARTED, common methods supported by both sides */
+    get invalid() {
+        return this.phase === PHASE_UNSENT;
+    }
+
+    /** returns whether the phase is PHASE_REQUESTED */
+    get requested() {
+        return this.phase === PHASE_REQUESTED;
+    }
+
+    /** returns whether the phase is PHASE_CANCELLED */
+    get cancelled() {
+        return this.phase === PHASE_CANCELLED;
+    }
+
+    /** returns whether the phase is PHASE_READY */
+    get ready() {
+        return this.phase === PHASE_READY;
+    }
+
+    /** returns whether the phase is PHASE_STARTED */
+    get started() {
+        return this.phase === PHASE_STARTED;
+    }
+
+    /** returns whether the phase is PHASE_DONE */
+    get done() {
+        return this.phase === PHASE_DONE;
+    }
+
+    /** once the phase is PHASE_STARTED (and !initiatedByMe) or PHASE_READY: common methods supported by both sides */
     get methods() {
         return this._commonMethods;
     }
 
-    /** the timeout of the request, provided for compatibility with previous verification code */
+    /** The current remaining amount of ms before the request should be automatically cancelled */
     get timeout() {
-        const elapsed = Date.now() - this._startTimestamp;
-        return Math.max(0, VERIFICATION_REQUEST_TIMEOUT - elapsed);
+        const requestEvent = this._getEventByEither(REQUEST_TYPE);
+        if (requestEvent) {
+            const elapsed = Date.now() - this.channel.getTimestamp(requestEvent);
+            return Math.max(0, VERIFICATION_REQUEST_TIMEOUT - elapsed);
+        }
+        return 0;
     }
 
-    /** the m.key.verification.request event that started this request, provided for compatibility with previous verification code */
-    get event() {
-        return this._requestEvent;
+    /**
+     * The key verification request event.
+     * @returns {MatrixEvent} The request event, or falsey if not found.
+     */
+    get requestEvent() {
+        return this._getEventByEither(REQUEST_TYPE);
     }
 
     /** current phase of the request. Some properties might only be defined in a current phase. */
@@ -140,11 +182,50 @@ export default class VerificationRequest extends EventEmitter {
         return this._verifier;
     }
 
+    get canAccept() {
+        return this.phase < PHASE_READY && !this._accepting && !this._declining;
+    }
+
+    get accepting() {
+        return this._accepting;
+    }
+
+    get declining() {
+        return this._declining;
+    }
+
     /** whether this request has sent it's initial event and needs more events to complete */
     get pending() {
-        return this._phase !== PHASE_UNSENT
-            && this._phase !== PHASE_DONE
-            && this._phase !== PHASE_CANCELLED;
+        return !this.observeOnly &&
+            this._phase !== PHASE_DONE &&
+            this._phase !== PHASE_CANCELLED;
+    }
+
+    /** Checks whether the other party supports a given verification method.
+     *  This is useful when setting up the QR code UI, as it is somewhat asymmetrical:
+     *  if the other party supports SCAN_QR, we should show a QR code in the UI, and vice versa.
+     *  For methods that need to be supported by both ends, use the `methods` property.
+     *  @param {string} method the method to check
+     *  @return {bool} whether or not the other party said the supported the method */
+    otherPartySupportsMethod(method) {
+        if (!this.ready && !this.started) {
+            return false;
+        }
+        const theirMethodEvent = this._eventsByThem.get(REQUEST_TYPE) ||
+            this._eventsByThem.get(READY_TYPE);
+        if (!theirMethodEvent) {
+            return false;
+        }
+        const content = theirMethodEvent.getContent();
+        if (!content) {
+            return false;
+        }
+        const {methods} = content;
+        if (!Array.isArray(methods)) {
+            return false;
+        }
+
+        return methods.includes(method);
     }
 
     /** Whether this request was initiated by the syncing user.
@@ -152,25 +233,106 @@ export default class VerificationRequest extends EventEmitter {
      * For ToDeviceChannel, this is who sent the .start event
      */
     get initiatedByMe() {
-        return this._initiatedByMe;
+        // event created by us but no remote echo has been received yet
+        const noEventsYet = (this._eventsByUs.size + this._eventsByThem.size) === 0;
+        if (this._phase === PHASE_UNSENT && noEventsYet) {
+            return true;
+        }
+        const hasMyRequest = this._eventsByUs.has(REQUEST_TYPE);
+        const hasTheirRequest = this._eventsByThem.has(REQUEST_TYPE);
+        if (hasMyRequest && !hasTheirRequest) {
+            return true;
+        }
+        if (!hasMyRequest && hasTheirRequest) {
+            return false;
+        }
+        const hasMyStart = this._eventsByUs.has(START_TYPE);
+        const hasTheirStart = this._eventsByThem.has(START_TYPE);
+        if (hasMyStart && !hasTheirStart) {
+            return true;
+        }
+        return false;
     }
 
-    /** the id of the user that initiated the request */
+    /** The id of the user that initiated the request */
     get requestingUserId() {
         if (this.initiatedByMe) {
             return this._client.getUserId();
         } else {
-            return this._otherUserId;
+            return this.otherUserId;
         }
     }
 
-    /** the id of the user that (will) receive(d) the request */
+    /** The id of the user that (will) receive(d) the request */
     get receivingUserId() {
         if (this.initiatedByMe) {
-            return this._otherUserId;
+            return this.otherUserId;
         } else {
             return this._client.getUserId();
         }
+    }
+
+    /** The user id of the other party in this request */
+    get otherUserId() {
+        return this.channel.userId;
+    }
+
+    /**
+     * The id of the user that cancelled the request,
+     * only defined when phase is PHASE_CANCELLED
+     */
+    get cancellingUserId() {
+        const myCancel = this._eventsByUs.get(CANCEL_TYPE);
+        const theirCancel = this._eventsByThem.get(CANCEL_TYPE);
+
+        if (myCancel && (!theirCancel || myCancel.getId() < theirCancel.getId())) {
+            return myCancel.getSender();
+        }
+        if (theirCancel) {
+            return theirCancel.getSender();
+        }
+        return undefined;
+    }
+
+    /**
+     * The cancellation code e.g m.user which is responsible for cancelling this verification
+     */
+    get cancellationCode() {
+        const ev = this._getEventByEither(CANCEL_TYPE);
+        return ev ? ev.getContent().code : null;
+    }
+
+    get observeOnly() {
+        return this._observeOnly;
+    }
+
+    /**
+     * The unpadded base64 encoded shared secret. Primarily used for QR code
+     * verification.
+     */
+    get encodedSharedSecret() {
+        if (!this._sharedSecret) this._generateSharedSecret();
+        return this._sharedSecret;
+    }
+
+    /**
+     * Gets which device the verification should be started with
+     * given the events sent so far in the verification. This is the
+     * same algorithm used to determine which device to send the
+     * verification to when no specific device is specified.
+     * @returns {{userId: *, deviceId: *}} The device information
+     */
+    get targetDevice() {
+        const theirFirstEvent =
+            this._eventsByThem.get(REQUEST_TYPE) ||
+            this._eventsByThem.get(READY_TYPE) ||
+            this._eventsByThem.get(START_TYPE);
+        const theirFirstContent = theirFirstEvent.getContent();
+        const fromDevice = theirFirstContent.from_device;
+        return {
+            userId: this.otherUserId,
+            deviceId: fromDevice,
+        };
     }
 
     /* Start the key verification, creating a verifier and sending a .start event.
@@ -182,8 +344,13 @@ export default class VerificationRequest extends EventEmitter {
      */
     beginKeyVerification(method, targetDevice = null) {
         // need to allow also when unsent in case of to_device
-        if (!this._verifier) {
-            if (this._hasValidPreStartPhase()) {
+        if (!this.observeOnly && !this._verifier) {
+            const validStartPhase =
+                this.phase === PHASE_REQUESTED ||
+                this.phase === PHASE_READY ||
+                (this.phase === PHASE_UNSENT &&
+                    this.channel.constructor.canCreateRequest(START_TYPE));
+            if (validStartPhase) {
                 // when called on a request that was initiated with .request event
                 // check the method is supported by both sides
                 if (this._commonMethods.length && !this._commonMethods.includes(method)) {
@@ -203,12 +370,10 @@ export default class VerificationRequest extends EventEmitter {
      * @returns {Promise} resolves when the event has been sent.
      */
     async sendRequest() {
-        if (this._phase === PHASE_UNSENT) {
-            this._initiatedByMe = true;
-            this._setPhase(PHASE_REQUESTED, false);
+        if (!this.observeOnly && this._phase === PHASE_UNSENT) {
             const methods = [...this._verificationMethods.keys()];
             await this.channel.send(REQUEST_TYPE, {methods});
-            this.emit("change");
+            this._generateSharedSecret();
         }
     }
 
@@ -219,32 +384,65 @@ export default class VerificationRequest extends EventEmitter {
      * @returns {Promise} resolves when the event has been sent.
      */
     async cancel({reason = "User declined", code = "m.user"} = {}) {
-        if (this._phase !== PHASE_CANCELLED) {
+        if (!this.observeOnly && this._phase !== PHASE_CANCELLED) {
+            this._declining = true;
+            this.emit("change");
             if (this._verifier) {
-                return this._verifier.cancel(errorFactory(code, reason));
+                return this._verifier.cancel(errorFactory(code, reason)());
             } else {
-                this._setPhase(PHASE_CANCELLED, false);
+                this._cancellingUserId = this._client.getUserId();
                 await this.channel.send(CANCEL_TYPE, {code, reason});
             }
-            this.emit("change");
         }
     }
 
-    /** @returns {Promise} with the verifier once it becomes available. Can be used after calling `sendRequest`. */
-    waitForVerifier() {
-        if (this.verifier) {
-            return Promise.resolve(this.verifier);
-        } else {
-            return new Promise(resolve => {
-                const checkVerifier = () => {
-                    if (this.verifier) {
-                        this.off("change", checkVerifier);
-                        resolve(this.verifier);
-                    }
-                };
-                this.on("change", checkVerifier);
-            });
+    /**
+     * Accepts the request, sending a .ready event to the other party
+     * @returns {Promise} resolves when the event has been sent.
+     */
+    async accept() {
+        if (!this.observeOnly && this.phase === PHASE_REQUESTED && !this.initiatedByMe) {
+            const methods = [...this._verificationMethods.keys()];
+            this._accepting = true;
+            this.emit("change");
+            await this.channel.send(READY_TYPE, {methods});
+            this._generateSharedSecret();
         }
+    }
+
+    _generateSharedSecret() {
+        const secretBytes = new Uint8Array(8);
+        global.crypto.getRandomValues(secretBytes);
+        this._sharedSecret = olmlib.encodeUnpaddedBase64(secretBytes);
+    }
+
+    /**
+     * Can be used to listen for state changes until the callback returns true.
+     * @param {Function} fn callback to evaluate whether the request is in the desired state.
+     *                      Takes the request as an argument.
+     * @returns {Promise} that resolves once the callback returns true
+     * @throws {Error} when the request is cancelled
+     */
+    waitFor(fn) {
+        return new Promise((resolve, reject) => {
+            const check = () => {
+                let handled = false;
+                if (fn(this)) {
+                    resolve(this);
+                    handled = true;
+                } else if (this.cancelled) {
+                    reject(new Error("cancelled"));
+                    handled = true;
+                }
+                if (handled) {
+                    this.off("change", check);
+                }
+                return handled;
+            };
+            if (!check()) {
+                this.on("change", check);
+            }
+        });
     }
 
     _setPhase(phase, notify = true) {
@@ -254,155 +452,310 @@ export default class VerificationRequest extends EventEmitter {
         }
     }
 
+    _getEventByEither(type) {
+        return this._eventsByThem.get(type) || this._eventsByUs.get(type);
+    }
+
+    _getEventBy(type, byThem) {
+        if (byThem) {
+            return this._eventsByThem.get(type);
+        } else {
+            return this._eventsByUs.get(type);
+        }
+    }
+
+    _calculatePhaseTransitions() {
+        const transitions = [{phase: PHASE_UNSENT}];
+        const phase = () => transitions[transitions.length - 1].phase;
+
+        // always pass by .request first to be sure channel.userId has been set
+        const hasRequestByThem = this._eventsByThem.has(REQUEST_TYPE);
+        const requestEvent = this._getEventBy(REQUEST_TYPE, hasRequestByThem);
+        if (requestEvent) {
+            transitions.push({phase: PHASE_REQUESTED, event: requestEvent});
+        }
+
+        const readyEvent =
+            requestEvent && this._getEventBy(READY_TYPE, !hasRequestByThem);
+        if (readyEvent && phase() === PHASE_REQUESTED) {
+            transitions.push({phase: PHASE_READY, event: readyEvent});
+        }
+
+        let startEvent;
+        if (readyEvent || !requestEvent) {
+            const theirStartEvent = this._eventsByThem.get(START_TYPE);
+            const ourStartEvent = this._eventsByUs.get(START_TYPE);
+            // any party can send .start after a .ready or unsent
+            if (theirStartEvent && ourStartEvent) {
+                startEvent = theirStartEvent.getSender() < ourStartEvent.getSender() ?
+                    theirStartEvent : ourStartEvent;
+            } else {
+                startEvent = theirStartEvent ? theirStartEvent : ourStartEvent;
+            }
+        } else {
+            startEvent = this._getEventBy(START_TYPE, !hasRequestByThem);
+        }
+        if (startEvent) {
+            const fromRequestPhase = phase() === PHASE_REQUESTED &&
+                requestEvent.getSender() !== startEvent.getSender();
+            const fromUnsentPhase = phase() === PHASE_UNSENT &&
+                this.channel.constructor.canCreateRequest(START_TYPE);
+            if (fromRequestPhase || phase() === PHASE_READY || fromUnsentPhase) {
+                transitions.push({phase: PHASE_STARTED, event: startEvent});
+            }
+        }
+
+        const ourDoneEvent = this._eventsByUs.get(DONE_TYPE);
+        if (this._verifierHasFinished || (ourDoneEvent && phase() === PHASE_STARTED)) {
+            transitions.push({phase: PHASE_DONE});
+        }
+
+        const cancelEvent = this._getEventByEither(CANCEL_TYPE);
+        if (cancelEvent && phase() !== PHASE_DONE) {
+            transitions.push({phase: PHASE_CANCELLED, event: cancelEvent});
+            return transitions;
+        }
+
+        return transitions;
+    }
+
+    _transitionToPhase(transition) {
+        const {phase, event} = transition;
+        // get common methods
+        if (phase === PHASE_REQUESTED || phase === PHASE_READY) {
+            if (!this._wasSentByOwnDevice(event)) {
+                const content = event.getContent();
+                this._commonMethods =
+                    content.methods.filter(m => this._verificationMethods.has(m));
+            }
+        }
+        // detect if we're not a party in the request, and we should just observe
+        if (!this.observeOnly) {
+            // if requested or accepted by one of my other devices
+            if (phase === PHASE_REQUESTED ||
+                phase === PHASE_STARTED ||
+                phase === PHASE_READY
+            ) {
+                if (
+                    this.channel.receiveStartFromOtherDevices &&
+                    this._wasSentByOwnUser(event) &&
+                    !this._wasSentByOwnDevice(event)
+                ) {
+                    this._observeOnly = true;
+                }
+            }
+        }
+        // create verifier
+        if (phase === PHASE_STARTED) {
+            const {method} = event.getContent();
+            if (!this._verifier && !this.observeOnly) {
+                this._verifier = this._createVerifier(method, event);
+            }
+        }
+    }
+
+    _applyPhaseTransitions() {
+        const transitions = this._calculatePhaseTransitions();
+        const existingIdx = transitions.findIndex(t => t.phase === this.phase);
+        // trim off phases we already went through, if any
+        const newTransitions = transitions.slice(existingIdx + 1);
+        // transition to all new phases
+        for (const transition of newTransitions) {
+            this._transitionToPhase(transition);
+        }
+        return newTransitions;
+    }
+
     /**
      * Changes the state of the request and verifier in response to a key verification event.
      * @param {string} type the "symbolic" event type, as returned by the `getEventType` function on the channel.
      * @param {MatrixEvent} event the event to handle. Don't call getType() on it but use the `type` parameter instead.
-     * @param {number} timestamp the timestamp in milliseconds when this event was sent.
+     * @param {bool} isLiveEvent whether this is an even received through sync or not
+     * @param {bool} isRemoteEcho whether this is the remote echo of an event sent by the same device
+     * @param {bool} isSentByUs whether this event is sent by a party that can accept and/or observe the request like one of our peers.
+     *   For InRoomChannel this means any device for the syncing user. For ToDeviceChannel, just the syncing device.
      * @returns {Promise} a promise that resolves when any requests as an anwser to the passed-in event are sent.
      */
-    async handleEvent(type, event, timestamp) {
-        const content = event.getContent();
-        if (type === REQUEST_TYPE || type === START_TYPE) {
-            if (this._startTimestamp === null) {
-                this._startTimestamp = timestamp;
-            }
+    async handleEvent(type, event, isLiveEvent, isRemoteEcho, isSentByUs) {
+        // if reached phase cancelled or done, ignore anything else that comes
+        if (this.done || this.cancelled) {
+            return;
         }
-        if (type === REQUEST_TYPE) {
-            await this._handleRequest(content, event);
-        } else if (type === START_TYPE) {
-            await this._handleStart(content, event);
-        }
+        const wasObserveOnly = this._observeOnly;
 
-        if (this._verifier) {
-            if (type === CANCEL_TYPE || (this._verifier.events
-                && this._verifier.events.includes(type))) {
-                this._verifier.handleEvent(event);
+        this._adjustObserveOnly(event, isLiveEvent);
+
+        if (!this.observeOnly && !isRemoteEcho) {
+            if (await this._cancelOnError(type, event)) {
+                return;
             }
         }
 
-        if (type === CANCEL_TYPE) {
-            this._handleCancel();
-        } else if (type === DONE_TYPE) {
-            this._handleDone();
+        const oldPhase = this.phase;
+        this._addEvent(type, event, isSentByUs);
+
+        // this will create if needed the verifier so needs to happen before calling it
+        const newTransitions = this._applyPhaseTransitions();
+        try {
+            // only pass events from the other side to the verifier,
+            // no remote echos of our own events
+            if (this._verifier && !this.observeOnly) {
+                const oldEvent = this._verifier.startEvent;
+                // if the verifier does not have a startEvent, it is because it's still sending and we are on the initator side
+                const oldSender = oldEvent ?
+                    oldEvent.getSender() :
+                    this._client.getUserId();
+                const newEventWinsRace = event.getSender() < oldSender;
+                if (this._verifier.canSwitchStartEvent(event) && newEventWinsRace) {
+                    this._verifier.switchStartEvent(event);
+                } else if (!isRemoteEcho) {
+                     if (type === CANCEL_TYPE || (this._verifier.events
+                        && this._verifier.events.includes(type))) {
+                        this._verifier.handleEvent(event);
+                    }
+                }
+            }
+
+            if (newTransitions.length) {
+                const lastTransition = newTransitions[newTransitions.length - 1];
+                const {phase} = lastTransition;
+
+                this._setupTimeout(phase);
+                // set phase as last thing as this emits the "change" event
+                this._setPhase(phase);
+            } else if (this._observeOnly !== wasObserveOnly) {
+                this.emit("change");
+            }
+        } finally {
+            // log events we processed so we can see from rageshakes what events were added to a request
+            logger.log(`Verification request ${this.channel.transactionId}: ` +
+                `${type} event with id:${event.getId()}, ` +
+                `content:${JSON.stringify(event.getContent())} ` +
+                `deviceId:${this.channel.deviceId}, ` +
+                `sender:${event.getSender()}, isSentByUs:${isSentByUs}, ` +
+                `isLiveEvent:${isLiveEvent}, isRemoteEcho:${isRemoteEcho}, ` +
+                `phase:${oldPhase}=>${this.phase}, ` +
+                `observeOnly:${wasObserveOnly}=>${this._observeOnly}`);
         }
     }
 
-    async _handleRequest(content, event) {
-        if (this._phase === PHASE_UNSENT) {
-            const otherMethods = content.methods;
-            this._commonMethods = otherMethods.
-                filter(m => this._verificationMethods.has(m));
-            this._requestEvent = event;
-            this._initiatedByMe = this._wasSentByMe(event);
-            this._setPhase(PHASE_REQUESTED);
-        } else if (this._phase !== PHASE_REQUESTED) {
-            logger.warn("Ignoring flagged verification request from " +
-                event.getSender());
-            await this.cancel(errorFromEvent(newUnexpectedMessageError()));
+    _setupTimeout(phase) {
+        const shouldTimeout = !this._timeoutTimer && !this.observeOnly &&
+            phase === PHASE_REQUESTED && this.initiatedByMe;
+
+        if (shouldTimeout) {
+            this._timeoutTimer = setTimeout(this._cancelOnTimeout, this.timeout);
+        }
+        if (this._timeoutTimer) {
+            const shouldClear = phase === PHASE_STARTED ||
+                phase === PHASE_READY ||
+                phase === PHASE_DONE ||
+                phase === PHASE_CANCELLED;
+            if (shouldClear) {
+                clearTimeout(this._timeoutTimer);
+                this._timeoutTimer = null;
+            }
         }
     }
 
-    _hasValidPreStartPhase() {
-        return this._phase === PHASE_REQUESTED ||
-            (
-                this.channel.constructor.canCreateRequest(START_TYPE) &&
-                this._phase === PHASE_UNSENT
-            );
-    }
+    _cancelOnTimeout = () => {
+        try {
+            this.cancel({reason: "Other party didn't accept in time", code: "m.timeout"});
+        } catch (err) {
+            logger.error("Error while cancelling verification request", err);
+        }
+    };
 
-    async _handleStart(content, event) {
-        if (this._hasValidPreStartPhase()) {
-            const {method} = content;
+    async _cancelOnError(type, event) {
+        if (type === START_TYPE) {
+            const method = event.getContent().method;
             if (!this._verificationMethods.has(method)) {
                 await this.cancel(errorFromEvent(newUnknownMethodError()));
-            } else {
-                // if not in requested phase
-                if (this.phase === PHASE_UNSENT) {
-                    this._initiatedByMe = this._wasSentByMe(event);
+                return true;
+            }
+        }
+
+        const isUnexpectedRequest = type === REQUEST_TYPE && this.phase !== PHASE_UNSENT;
+        const isUnexpectedReady = type === READY_TYPE && this.phase !== PHASE_REQUESTED;
+        // only if phase has passed from PHASE_UNSENT should we cancel, because events
+        // are allowed to come in in any order (at least with InRoomChannel). So we only know
+        // we're dealing with a valid request we should participate in once we've moved to PHASE_REQUESTED
+        // before that, we could be looking at somebody elses verification request and we just
+        // happen to be in the room
+        if (this.phase !== PHASE_UNSENT && (isUnexpectedRequest || isUnexpectedReady)) {
+            logger.warn(`Cancelling, unexpected ${type} verification ` +
+                `event from ${event.getSender()}`);
+            const reason = `Unexpected ${type} event in phase ${this.phase}`;
+            await this.cancel(errorFromEvent(newUnexpectedMessageError({reason})));
+            return true;
+        }
+        return false;
+    }
+
+    _adjustObserveOnly(event, isLiveEvent) {
+        // don't send out events for historical requests
+        if (!isLiveEvent) {
+            this._observeOnly = true;
+        }
+        // a timestamp is not provided on all to_device events
+        const timestamp = this.channel.getTimestamp(event);
+        if (Number.isFinite(timestamp)) {
+            const elapsed = Date.now() - timestamp;
+            // don't allow interaction on old requests
+            if (elapsed > (VERIFICATION_REQUEST_TIMEOUT - VERIFICATION_REQUEST_MARGIN) ||
+                elapsed < -(VERIFICATION_REQUEST_TIMEOUT / 2)
+            ) {
+                this._observeOnly = true;
+            }
+        }
+    }
+
+    _addEvent(type, event, isSentByUs) {
+        if (isSentByUs) {
+            this._eventsByUs.set(type, event);
+        } else {
+            this._eventsByThem.set(type, event);
+        }
+
+        // once we know the userId of the other party (from the .request event)
+        // see if any event by anyone else crept into this._eventsByThem
+        if (type === REQUEST_TYPE) {
+            for (const [type, event] of this._eventsByThem.entries()) {
+                if (event.getSender() !== this.otherUserId) {
+                    this._eventsByThem.delete(type);
                 }
-                this._verifier = this._createVerifier(method, event);
-                this._setPhase(PHASE_STARTED);
             }
-        }
-    }
-
-    /**
-     * Called by RequestCallbackChannel when the verifier sends an event
-     * @param {string} type the "symbolic" event type
-     * @param {object} content the completed or uncompleted content for the event to be sent
-     */
-    handleVerifierSend(type, content) {
-        if (type === CANCEL_TYPE) {
-            this._handleCancel();
-        } else if (type === START_TYPE) {
-            if (this._phase === PHASE_UNSENT || this._phase === PHASE_REQUESTED) {
-                // if unsent, we're sending a (first) .start event and hence requesting the verification.
-                // in any other situation, the request was initiated by the other party.
-                this._initiatedByMe = this.phase === PHASE_UNSENT;
-                this._setPhase(PHASE_STARTED);
-            }
-        }
-    }
-
-    _handleCancel() {
-        if (this._phase !== PHASE_CANCELLED) {
-            this._setPhase(PHASE_CANCELLED);
-        }
-    }
-
-    _handleDone() {
-        if (this._phase === PHASE_STARTED) {
-            this._setPhase(PHASE_DONE);
         }
     }
 
     _createVerifier(method, startEvent = null, targetDevice = null) {
-        const startSentByMe = startEvent && this._wasSentByMe(startEvent);
-        const {userId, deviceId} = this._getVerifierTarget(startEvent, targetDevice);
+        if (!targetDevice) {
+            targetDevice = this.targetDevice;
+        }
+        const {userId, deviceId} = targetDevice;
 
         const VerifierCtor = this._verificationMethods.get(method);
         if (!VerifierCtor) {
-            console.warn("could not find verifier constructor for method", method);
+            logger.warn("could not find verifier constructor for method", method);
             return;
         }
-        // invokes handleVerifierSend when verifier sends something
-        const callbackMedium = new RequestCallbackChannel(this, this.channel);
         return new VerifierCtor(
-            callbackMedium,
+            this.channel,
             this._client,
             userId,
             deviceId,
-            startSentByMe ? null : startEvent,
+            startEvent,
+            this,
         );
     }
 
-    _getVerifierTarget(startEvent, targetDevice) {
-        // targetDevice should be set when creating a verifier for to_device before the .start event has been sent,
-        // so the userId and deviceId are provided
-        if (targetDevice) {
-            return targetDevice;
-        } else {
-            let targetEvent;
-            if (startEvent && !this._wasSentByMe(startEvent)) {
-                targetEvent = startEvent;
-            } else if (this._requestEvent && !this._wasSentByMe(this._requestEvent)) {
-                targetEvent = this._requestEvent;
-            } else {
-                throw new Error(
-                    "can't determine who the verifier should be targeted at. " +
-                    "No .request or .start event and no targetDevice");
-            }
-            const userId = targetEvent.getSender();
-            const content = targetEvent.getContent();
-            const deviceId = content && content.from_device;
-            return {userId, deviceId};
-        }
+    _wasSentByOwnUser(event) {
+        return event.getSender() === this._client.getUserId();
     }
 
-    // only for .request and .start
-    _wasSentByMe(event) {
-        if (event.getSender() !== this._client.getUserId()) {
+    // only for .request, .ready or .start
+    _wasSentByOwnDevice(event) {
+        if (!this._wasSentByOwnUser(event)) {
             return false;
         }
         const content = event.getContent();
@@ -410,5 +763,17 @@ export default class VerificationRequest extends EventEmitter {
             return false;
         }
         return true;
+    }
+
+    onVerifierFinished() {
+        if (this.channel.needsDoneMessage) {
+            // verification in DM requires a done message
+            this.channel.send("m.key.verification.done", {});
+        }
+        this._verifierHasFinished = true;
+        const newTransitions = this._applyPhaseTransitions();
+        if (newTransitions.length) {
+            this._setPhase(newTransitions[newTransitions.length - 1].phase);
+        }
     }
 }

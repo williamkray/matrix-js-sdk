@@ -1,5 +1,6 @@
 /*
 Copyright 2019 New Vector Ltd
+Copyright 2019 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,30 +14,29 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import logger from '../../../../lib/logger';
-
-try {
-    global.Olm = require('olm');
-} catch (e) {
-    logger.warn("unable to run device verification tests: libolm not available");
-}
-
-import {verificationMethods} from '../../../../lib/crypto';
-
-import SAS from '../../../../lib/crypto/verification/SAS';
+import "../../../olm-loader";
+import {verificationMethods} from "../../../../src/crypto";
+import {logger} from "../../../../src/logger";
+import {SAS} from "../../../../src/crypto/verification/SAS";
+import {makeTestClients, setupWebcrypto, teardownWebcrypto} from './util';
 
 const Olm = global.Olm;
 
-import {makeTestClients} from './util';
+jest.useFakeTimers();
 
-describe("verification request", function() {
+describe("verification request integration tests with crypto layer", function() {
     if (!global.Olm) {
         logger.warn('Not running device verification unit tests: libolm not present');
         return;
     }
 
     beforeAll(function() {
+        setupWebcrypto();
         return Olm.init();
+    });
+
+    afterAll(() => {
+        teardownWebcrypto();
     });
 
     it("should request and accept a verification", async function() {
@@ -71,7 +71,9 @@ describe("verification request", function() {
             // XXX: Private function access (but it's a test, so we're okay)
             bobVerifier._endTimer();
         });
-        const aliceVerifier = await alice.client.requestVerification("@bob:example.com");
+        const aliceRequest = await alice.client.requestVerification("@bob:example.com");
+        await aliceRequest.waitFor(r => r.started);
+        const aliceVerifier = aliceRequest.verifier;
         expect(aliceVerifier).toBeInstanceOf(SAS);
 
         // XXX: Private function access (but it's a test, so we're okay)

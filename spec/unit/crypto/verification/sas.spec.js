@@ -1,5 +1,6 @@
 /*
 Copyright 2018-2019 New Vector Ltd
+Copyright 2019 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,28 +14,16 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import logger from '../../../../lib/logger';
-
-try {
-    global.Olm = require('olm');
-} catch (e) {
-    logger.warn("unable to run device verification tests: libolm not available");
-}
-
-import olmlib from '../../../../lib/crypto/olmlib';
-
-import sdk from '../../../..';
-
-import {verificationMethods} from '../../../../lib/crypto';
-import DeviceInfo from '../../../../lib/crypto/deviceinfo';
-
-import SAS from '../../../../lib/crypto/verification/SAS';
+import "../../../olm-loader";
+import {makeTestClients, setupWebcrypto, teardownWebcrypto} from './util';
+import {MatrixEvent} from "../../../../src/models/event";
+import {SAS} from "../../../../src/crypto/verification/SAS";
+import {DeviceInfo} from "../../../../src/crypto/deviceinfo";
+import {verificationMethods} from "../../../../src/crypto";
+import * as olmlib from "../../../../src/crypto/olmlib";
+import {logger} from "../../../../src/logger";
 
 const Olm = global.Olm;
-
-const MatrixEvent = sdk.MatrixEvent;
-
-import {makeTestClients} from './util';
 
 let ALICE_DEVICES;
 let BOB_DEVICES;
@@ -46,7 +35,12 @@ describe("SAS verification", function() {
     }
 
     beforeAll(function() {
+        setupWebcrypto();
         return Olm.init();
+    });
+
+    afterAll(() => {
+        teardownWebcrypto();
     });
 
     it("should error on an unexpected event", async function() {
@@ -453,9 +447,11 @@ describe("SAS verification", function() {
                 });
             });
 
-            aliceVerifier = await alice.client.requestVerificationDM(
-                bob.client.getUserId(), "!room_id", [verificationMethods.SAS],
+            const aliceRequest = await alice.client.requestVerificationDM(
+                bob.client.getUserId(), "!room_id",
             );
+            await aliceRequest.waitFor(r => r.started);
+            aliceVerifier = aliceRequest.verifier;
             aliceVerifier.on("show_sas", (e) => {
                 if (!e.sas.emoji || !e.sas.decimal) {
                     e.cancel();

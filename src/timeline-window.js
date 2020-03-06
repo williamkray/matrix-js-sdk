@@ -1,5 +1,6 @@
 /*
 Copyright 2016 OpenMarket Ltd
+Copyright 2019 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,12 +14,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-"use strict";
 
 /** @module timeline-window */
 
-const EventTimeline = require("./models/event-timeline");
-import logger from './logger';
+import {EventTimeline} from './models/event-timeline';
+import {logger} from './logger';
 
 /**
  * @private
@@ -66,7 +66,7 @@ const DEFAULT_PAGINATE_LOOP_LIMIT = 5;
  *
  * @constructor
  */
-function TimelineWindow(client, timelineSet, opts) {
+export function TimelineWindow(client, timelineSet, opts) {
     opts = opts || {};
     this._client = client;
     this._timelineSet = timelineSet;
@@ -89,7 +89,7 @@ function TimelineWindow(client, timelineSet, opts) {
  *    given event
  * @param {number} [initialWindowSize = 20]   Size of the initial window
  *
- * @return {module:client.Promise}
+ * @return {Promise}
  */
 TimelineWindow.prototype.load = function(initialEventId, initialWindowSize) {
     const self = this;
@@ -148,6 +148,62 @@ TimelineWindow.prototype.load = function(initialEventId, initialWindowSize) {
 };
 
 /**
+ * Get the TimelineIndex of the window in the given direction.
+ *
+ * @param {string} direction   EventTimeline.BACKWARDS to get the TimelineIndex
+ * at the start of the window; EventTimeline.FORWARDS to get the TimelineIndex at
+ * the end.
+ *
+ * @return {TimelineIndex} The requested timeline index if one exists, null
+ * otherwise.
+ */
+TimelineWindow.prototype.getTimelineIndex = function(direction) {
+    if (direction == EventTimeline.BACKWARDS) {
+        return this._start;
+    } else if (direction == EventTimeline.FORWARDS) {
+        return this._end;
+    } else {
+        throw new Error("Invalid direction '" + direction + "'");
+    }
+};
+
+/**
+ * Try to extend the window using events that are already in the underlying
+ * TimelineIndex.
+ *
+ * @param {string} direction   EventTimeline.BACKWARDS to try extending it
+ *   backwards; EventTimeline.FORWARDS to try extending it forwards.
+ * @param {number} size   number of events to try to extend by.
+ *
+ * @return {boolean} true if the window was extended, false otherwise.
+ */
+TimelineWindow.prototype.extend = function(direction, size) {
+    const tl = this.getTimelineIndex(direction);
+
+    if (!tl) {
+        debuglog("TimelineWindow: no timeline yet");
+        return false;
+    }
+
+    const count = (direction == EventTimeline.BACKWARDS) ?
+        tl.retreat(size) : tl.advance(size);
+
+    if (count) {
+        this._eventCount += count;
+        debuglog("TimelineWindow: increased cap by " + count +
+                 " (now " + this._eventCount + ")");
+        // remove some events from the other end, if necessary
+        const excess = this._eventCount - this._windowLimit;
+        if (excess > 0) {
+            this.unpaginate(excess, direction != EventTimeline.BACKWARDS);
+        }
+        return true;
+    }
+
+    return false;
+};
+
+/**
  * Check if this window can be extended
  *
  * <p>This returns true if we either have more events, or if we have a
@@ -161,14 +217,7 @@ TimelineWindow.prototype.load = function(initialEventId, initialWindowSize) {
  * @return {boolean} true if we can paginate in the given direction
  */
 TimelineWindow.prototype.canPaginate = function(direction) {
-    let tl;
-    if (direction == EventTimeline.BACKWARDS) {
-        tl = this._start;
-    } else if (direction == EventTimeline.FORWARDS) {
-        tl = this._end;
-    } else {
-        throw new Error("Invalid direction '" + direction + "'");
-    }
+    const tl = this.getTimelineIndex(direction);
 
     if (!tl) {
         debuglog("TimelineWindow: no timeline yet");
@@ -208,7 +257,7 @@ TimelineWindow.prototype.canPaginate = function(direction) {
  * @param {number} [requestLimit = 5] limit for the number of API requests we
  *    should make.
  *
- * @return {module:client.Promise} Resolves to a boolean which is true if more events
+ * @return {Promise} Resolves to a boolean which is true if more events
  *    were successfully retrieved.
  */
 TimelineWindow.prototype.paginate = function(direction, size, makeRequest,
@@ -224,14 +273,7 @@ TimelineWindow.prototype.paginate = function(direction, size, makeRequest,
         requestLimit = DEFAULT_PAGINATE_LOOP_LIMIT;
     }
 
-    let tl;
-    if (direction == EventTimeline.BACKWARDS) {
-        tl = this._start;
-    } else if (direction == EventTimeline.FORWARDS) {
-        tl = this._end;
-    } else {
-        throw new Error("Invalid direction '" + direction + "'");
-    }
+    const tl = this.getTimelineIndex(direction);
 
     if (!tl) {
         debuglog("TimelineWindow: no timeline yet");
@@ -243,18 +285,7 @@ TimelineWindow.prototype.paginate = function(direction, size, makeRequest,
     }
 
     // try moving the cap
-    const count = (direction == EventTimeline.BACKWARDS) ?
-        tl.retreat(size) : tl.advance(size);
-
-    if (count) {
-        this._eventCount += count;
-        debuglog("TimelineWindow: increased cap by " + count +
-                 " (now " + this._eventCount + ")");
-        // remove some events from the other end, if necessary
-        const excess = this._eventCount - this._windowLimit;
-        if (excess > 0) {
-            this.unpaginate(excess, direction != EventTimeline.BACKWARDS);
-        }
+    if (this.extend(direction, size)) {
         return Promise.resolve(true);
     }
 
@@ -397,7 +428,7 @@ TimelineWindow.prototype.getEvents = function() {
  * @param {number} index
  * @private
  */
-function TimelineIndex(timeline, index) {
+export function TimelineIndex(timeline, index) {
     this.timeline = timeline;
 
     // the indexes are relative to BaseIndex, so could well be negative.
@@ -490,13 +521,3 @@ TimelineIndex.prototype.advance = function(delta) {
 TimelineIndex.prototype.retreat = function(delta) {
     return this.advance(delta * -1) * -1;
 };
-
-/**
- * The TimelineWindow class.
- */
-module.exports.TimelineWindow = TimelineWindow;
-
-/**
- * The TimelineIndex class. exported here for unit testing.
- */
-module.exports.TimelineIndex = TimelineIndex;

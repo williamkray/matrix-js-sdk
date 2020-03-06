@@ -15,21 +15,27 @@ limitations under the License.
 */
 
 import '../../olm-loader';
-
-import { MatrixEvent } from '../../../lib/models/event';
-import { SECRET_STORAGE_ALGORITHM_V1 } from '../../../lib/crypto/SecretStorage';
-
-import olmlib from '../../../lib/crypto/olmlib';
-
-import TestClient from '../../TestClient';
-import { makeTestClients } from './verification/util';
+import * as olmlib from "../../../src/crypto/olmlib";
+import {SECRET_STORAGE_ALGORITHM_V1} from "../../../src/crypto/SecretStorage";
+import {MatrixEvent} from "../../../src/models/event";
+import {TestClient} from '../../TestClient';
+import {makeTestClients} from './verification/util';
 
 async function makeTestClient(userInfo, options) {
     const client = (new TestClient(
         userInfo.userId, userInfo.deviceId, undefined, undefined, options,
     )).client;
 
+    // Make it seem as if we've synced and thus the store can be trusted to
+    // contain valid account data.
+    client.isInitialSyncComplete = function() {
+        return true;
+    };
+
     await client.initCrypto();
+
+    // No need to download keys for these tests
+    client._crypto.downloadKeys = async function() {};
 
     return client;
 }
@@ -106,11 +112,11 @@ describe("Secrets", function() {
             }),
         ]);
 
-        expect(secretStorage.isStored("foo")).toBe(false);
+        expect(await secretStorage.isStored("foo")).toBe(false);
 
         await secretStorage.store("foo", "bar", ["abc"]);
 
-        expect(secretStorage.isStored("foo")).toBe(true);
+        expect(await secretStorage.isStored("foo")).toBe(true);
         expect(await secretStorage.get("foo")).toBe("bar");
 
         expect(getKey).toHaveBeenCalled();
@@ -271,8 +277,8 @@ describe("Secrets", function() {
         const secretStorage = bob._crypto._secretStorage;
 
         expect(crossSigning.getId()).toBeTruthy();
-        expect(crossSigning.isStoredInSecretStorage(secretStorage)).toBeTruthy();
-        expect(secretStorage.hasKey()).toBeTruthy();
+        expect(await crossSigning.isStoredInSecretStorage(secretStorage)).toBeTruthy();
+        expect(await secretStorage.hasKey()).toBeTruthy();
     });
 
     it("bootstraps when cross-signing keys in secret storage", async function() {
@@ -287,8 +293,8 @@ describe("Secrets", function() {
             },
             {
                 cryptoCallbacks: {
-                    getSecretStorageKey: request => {
-                        const defaultKeyId = bob.getDefaultSecretStorageKeyId();
+                    getSecretStorageKey: async request => {
+                        const defaultKeyId = await bob.getDefaultSecretStorageKeyId();
                         expect(Object.keys(request.keys)).toEqual([defaultKeyId]);
                         return [defaultKeyId, storagePrivateKey];
                     },
@@ -327,7 +333,7 @@ describe("Secrets", function() {
         await bob.bootstrapSecretStorage();
 
         expect(crossSigning.getId()).toBeTruthy();
-        expect(crossSigning.isStoredInSecretStorage(secretStorage)).toBeTruthy();
-        expect(secretStorage.hasKey()).toBeTruthy();
+        expect(await crossSigning.isStoredInSecretStorage(secretStorage)).toBeTruthy();
+        expect(await secretStorage.hasKey()).toBeTruthy();
     });
 });

@@ -1,5 +1,6 @@
 /*
 Copyright 2018 New Vector Ltd
+Copyright 2020 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,105 +20,94 @@ limitations under the License.
  * @module crypto/verification/QRCode
  */
 
-import Base from "./Base";
+import {VerificationBase as Base} from "./Base";
 import {
-    errorFactory,
-    newUserCancelledError,
     newKeyMismatchError,
     newUserMismatchError,
 } from './Error';
 
-const MATRIXTO_REGEXP = /^(?:https?:\/\/)?(?:www\.)?matrix\.to\/#\/([#@!+][^?]+)\?(.+)$/;
-const KEY_REGEXP = /^key_([^:]+:.+)$/;
-
-const newQRCodeError = errorFactory("m.qr_code.invalid", "Invalid QR code");
+export const SHOW_QR_CODE_METHOD = "m.qr_code.show.v1";
+export const SCAN_QR_CODE_METHOD = "m.qr_code.scan.v1";
 
 /**
- * @class crypto/verification/QRCode/ShowQRCode
+ * @class crypto/verification/QRCode/ReciprocateQRCode
  * @extends {module:crypto/verification/Base}
  */
-export class ShowQRCode extends Base {
-    _doVerification() {
-        if (!this._done) {
-            const url = "https://matrix.to/#/" + this._baseApis.getUserId()
-                  + "?device=" + encodeURIComponent(this._baseApis.deviceId)
-                  + "&action=verify&key_ed25519%3A"
-                  + encodeURIComponent(this._baseApis.deviceId) + "="
-                  + encodeURIComponent(this._baseApis.getDeviceEd25519Key());
-            this.emit("show_qr_code", {
-                url: url,
-            });
-        }
-    }
-}
-
-ShowQRCode.NAME = "m.qr_code.show.v1";
-
-/**
- * @class crypto/verification/QRCode/ScanQRCode
- * @extends {module:crypto/verification/Base}
- */
-export class ScanQRCode extends Base {
+export class ReciprocateQRCode extends Base {
     static factory(...args) {
-        return new ScanQRCode(...args);
+        return new ReciprocateQRCode(...args);
+    }
+
+    static get NAME() {
+        return "m.reciprocate.v1";
     }
 
     async _doVerification() {
-        const code = await new Promise((resolve, reject) => {
-            this.emit("scan", {
-                done: resolve,
-                cancel: () => reject(newUserCancelledError()),
-            });
-        });
-
-        const match = code.match(MATRIXTO_REGEXP);
-        let deviceId;
-        const keys = {};
-        if (!match) {
-            throw newQRCodeError();
-        }
-        const userId = match[1];
-        const params = match[2].split("&").map(
-            (x) => x.split("=", 2).map(decodeURIComponent),
-        );
-        let action;
-        for (const [name, value] of params) {
-            if (name === "device") {
-                deviceId = value;
-            } else if (name === "action") {
-                action = value;
-            } else {
-                const keyMatch = name.match(KEY_REGEXP);
-                if (keyMatch) {
-                    keys[keyMatch[1]] = value;
-                }
-            }
-        }
-        if (!deviceId || action !== "verify" || Object.keys(keys).length === 0) {
-            throw newQRCodeError();
+        if (!this.startEvent) {
+            // TODO: Support scanning QR codes
+            throw new Error("It is not currently possible to start verification" +
+                "with this method yet.");
         }
 
+        const targetUserId = this.startEvent.getSender();
         if (!this.userId) {
-            await new Promise((resolve, reject) => {
+            console.log("Asking to confirm user ID");
+            this.userId = await new Promise((resolve, reject) => {
                 this.emit("confirm_user_id", {
-                    userId: userId,
-                    confirm: resolve,
+                    userId: targetUserId,
+                    confirm: resolve, // takes a userId
                     cancel: () => reject(newUserMismatchError()),
                 });
             });
-        } else if (this.userId !== userId) {
+        } else if (targetUserId !== this.userId) {
             throw newUserMismatchError({
                 expected: this.userId,
-                actual: userId,
+                actual: targetUserId,
             });
         }
 
-        await this._verifyKeys(userId, keys, (keyId, device, key) => {
-            if (device.keys[keyId] !== key) {
+        if (this.startEvent.getContent()['secret'] !== this.request.encodedSharedSecret) {
+            throw newKeyMismatchError();
+        }
+
+        // If we've gotten this far, verify the user's master cross signing key
+        const xsignInfo = this._baseApis.getStoredCrossSigningForUser(this.userId);
+        if (!xsignInfo) throw new Error("Missing cross signing info");
+
+        const masterKey = xsignInfo.getId("master");
+        const masterKeyId = `ed25519:${masterKey}`;
+        const keys = {[masterKeyId]: masterKey};
+
+        const devices = (await this._baseApis.getStoredDevicesForUser(this.userId)) || [];
+        const targetDevice = devices.find(d => {
+            return d.deviceId === this.request.targetDevice.deviceId;
+        });
+        if (!targetDevice) throw new Error("Device not found, somehow");
+        keys[`ed25519:${targetDevice.deviceId}`] = targetDevice.getFingerprint();
+
+        if (this.request.requestingUserId === this.request.receivingUserId) {
+            delete keys[masterKeyId];
+        }
+
+        await this._verifyKeys(this.userId, keys, (keyId, device, keyInfo) => {
+            const targetKey = keys[keyId];
+            if (!targetKey) throw newKeyMismatchError();
+
+            if (keyInfo !== targetKey) {
+                console.error("key ID from key info does not match");
                 throw newKeyMismatchError();
             }
+            for (const deviceKeyId in device.keys) {
+                if (!deviceKeyId.startsWith("ed25519")) continue;
+                const deviceTargetKey = keys[deviceKeyId];
+                if (!deviceTargetKey) throw newKeyMismatchError();
+                if (device.keys[deviceKeyId] !== deviceTargetKey) {
+                    console.error("master key does not match");
+                    throw newKeyMismatchError();
+                }
+            }
+
+            // Otherwise it is probably fine
         });
     }
 }
-
-ScanQRCode.NAME = "m.qr_code.scan.v1";

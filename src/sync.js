@@ -2,6 +2,7 @@
 Copyright 2015, 2016 OpenMarket Ltd
 Copyright 2017 Vector Creations Ltd
 Copyright 2018 New Vector Ltd
+Copyright 2019 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,7 +16,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-"use strict";
 
 /*
  * TODO:
@@ -25,15 +25,15 @@ limitations under the License.
  * an alternative syncing API, we may want to have a proper syncing interface
  * for HTTP and WS at some point.
  */
-const User = require("./models/user");
-const Room = require("./models/room");
-const Group = require('./models/group');
-const utils = require("./utils");
-const Filter = require("./filter");
-const EventTimeline = require("./models/event-timeline");
-const PushProcessor = require("./pushprocessor");
-import logger from './logger';
 
+import {User} from "./models/user";
+import {Room} from "./models/room";
+import {Group} from "./models/group";
+import * as utils from "./utils";
+import {Filter} from "./filter";
+import {EventTimeline} from "./models/event-timeline";
+import {PushProcessor} from "./pushprocessor";
+import {logger} from './logger';
 import {InvalidStoreError} from './errors';
 
 const DEBUG = true;
@@ -78,7 +78,7 @@ function debuglog(...params) {
  * @param {Boolean=} opts.disablePresence True to perform syncing without automatically
  * updating presence.
  */
-function SyncApi(client, opts) {
+export function SyncApi(client, opts) {
     this.client = client;
     opts = opts || {};
     opts.initialSyncLimit = (
@@ -388,8 +388,10 @@ SyncApi.prototype._peekPoll = function(peekRoom, token) {
         });
 
         // strip out events which aren't for the given room_id (e.g presence)
+        // and also ephemeral events (which we're assuming is anything without
+        // and event ID because the /events API doesn't separate them).
         const events = res.chunk.filter(function(e) {
-            return e.room_id === peekRoom.roomId;
+            return e.room_id === peekRoom.roomId && e.event_id;
         }).map(self.client.getEventMapper());
 
         peekRoom.addLiveEvents(events);
@@ -688,6 +690,7 @@ SyncApi.prototype._syncFromCache = async function(savedSync) {
         oldSyncToken: null,
         nextSyncToken,
         catchingUp: false,
+        fromCache: true,
     };
 
     const data = {
@@ -1237,7 +1240,8 @@ SyncApi.prototype._processSyncResponse = async function(
             }
         }
 
-        self._processRoomEvents(room, stateEvents, timelineEvents);
+        self._processRoomEvents(room, stateEvents,
+            timelineEvents, syncEventData.fromCache);
 
         // set summary after processing events,
         // because it will trigger a name calculation
@@ -1564,10 +1568,11 @@ SyncApi.prototype._resolveInvites = function(room) {
  * @param {MatrixEvent[]} stateEventList A list of state events. This is the state
  * at the *START* of the timeline list if it is supplied.
  * @param {MatrixEvent[]} [timelineEventList] A list of timeline events. Lower index
+ * @param {boolean} fromCache whether the sync response came from cache
  * is earlier in time. Higher index is later.
  */
 SyncApi.prototype._processRoomEvents = function(room, stateEventList,
-                                                timelineEventList) {
+                                                timelineEventList, fromCache) {
     // If there are no events in the timeline yet, initialise it with
     // the given state events
     const liveTimeline = room.getLiveTimeline();
@@ -1621,7 +1626,7 @@ SyncApi.prototype._processRoomEvents = function(room, stateEventList,
     // if the timeline has any state events in it.
     // This also needs to be done before running push rules on the events as they need
     // to be decorated with sender etc.
-    room.addLiveEvents(timelineEventList || []);
+    room.addLiveEvents(timelineEventList || [], null, fromCache);
 };
 
 /**
@@ -1697,5 +1702,3 @@ function createNewUser(client, userId) {
     return user;
 }
 
-/** */
-module.exports = SyncApi;

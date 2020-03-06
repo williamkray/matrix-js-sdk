@@ -15,10 +15,10 @@ limitations under the License.
 */
 
 import {EventEmitter} from 'events';
-import logger from '../logger';
-import olmlib from './olmlib';
-import { randomString } from '../randomstring';
-import { pkVerify } from './olmlib';
+import {logger} from '../logger';
+import * as olmlib from './olmlib';
+import {pkVerify} from './olmlib';
+import {randomString} from '../randomstring';
 
 export const SECRET_STORAGE_ALGORITHM_V1 = "m.secret_storage.v1.curve25519-aes-sha2";
 
@@ -26,7 +26,7 @@ export const SECRET_STORAGE_ALGORITHM_V1 = "m.secret_storage.v1.curve25519-aes-s
  * Implements Secure Secret Storage and Sharing (MSC1946)
  * @module crypto/SecretStorage
  */
-export default class SecretStorage extends EventEmitter {
+export class SecretStorage extends EventEmitter {
     constructor(baseApis, cryptoCallbacks, crossSigningInfo) {
         super();
         this._baseApis = baseApis;
@@ -36,12 +36,12 @@ export default class SecretStorage extends EventEmitter {
         this._incomingRequests = {};
     }
 
-    getDefaultKeyId() {
-        const defaultKeyEvent = this._baseApis.getAccountData(
+    async getDefaultKeyId() {
+        const defaultKey = await this._baseApis.getAccountDataFromServer(
             'm.secret_storage.default_key',
         );
-        if (!defaultKeyEvent) return null;
-        return defaultKeyEvent.getContent().key;
+        if (!defaultKey) return null;
+        return defaultKey.key;
     }
 
     setDefaultKeyId(keyId) {
@@ -112,7 +112,11 @@ export default class SecretStorage extends EventEmitter {
         if (!keyId) {
             do {
                 keyId = randomString(32);
-            } while (this._baseApis.getAccountData(`m.secret_storage.key.${keyId}`));
+            } while (
+                await this._baseApis.getAccountDataFromServer(
+                    `m.secret_storage.key.${keyId}`,
+                )
+            );
         }
 
         await this._crossSigningInfo.signObject(keyData, 'master');
@@ -130,18 +134,20 @@ export default class SecretStorage extends EventEmitter {
      * @param {string} [keyId = default key's ID] The ID of the key to sign.
      *     Defaults to the default key ID if not provided.
      */
-    async signKey(keyId = this.getDefaultKeyId()) {
+    async signKey(keyId) {
+        if (!keyId) {
+            keyId = await this.getDefaultKeyId();
+        }
         if (!keyId) {
             throw new Error("signKey requires a key ID");
         }
 
-        const keyInfoEvent = this._baseApis.getAccountData(
+        const keyInfo = await this._baseApis.getAccountDataFromServer(
             `m.secret_storage.key.${keyId}`,
         );
-        if (!keyInfoEvent) {
+        if (!keyInfo) {
             throw new Error(`Key ${keyId} does not exist in account data`);
         }
-        const keyInfo = keyInfoEvent.getContent();
 
         await this._crossSigningInfo.signObject(keyInfo, 'master');
         await this._baseApis.setAccountData(
@@ -156,15 +162,17 @@ export default class SecretStorage extends EventEmitter {
      *     for. Defaults to the default key ID if not provided.
      * @return {boolean} Whether we have the key.
      */
-    hasKey(keyId = this.getDefaultKeyId()) {
+    async hasKey(keyId) {
+        if (!keyId) {
+            keyId = await this.getDefaultKeyId();
+        }
         if (!keyId) {
             return false;
         }
 
-        const keyInfo = this._baseApis.getAccountData(
+        return !!this._baseApis.getAccountDataFromServer(
             "m.secret_storage.key." + keyId,
         );
-        return keyInfo && keyInfo.getContent();
     }
 
     /**
@@ -179,7 +187,7 @@ export default class SecretStorage extends EventEmitter {
         const encrypted = {};
 
         if (!keys) {
-            const defaultKeyId = this.getDefaultKeyId();
+            const defaultKeyId = await this.getDefaultKeyId();
             if (!defaultKeyId) {
                 throw new Error("No keys specified and no default key present");
             }
@@ -192,28 +200,27 @@ export default class SecretStorage extends EventEmitter {
 
         for (const keyId of keys) {
             // get key information from key storage
-            const keyInfo = this._baseApis.getAccountData(
+            const keyInfo = await this._baseApis.getAccountDataFromServer(
                 "m.secret_storage.key." + keyId,
             );
             if (!keyInfo) {
                 throw new Error("Unknown key: " + keyId);
             }
-            const keyInfoContent = keyInfo.getContent();
 
             // check signature of key info
             pkVerify(
-                keyInfoContent,
+                keyInfo,
                 this._crossSigningInfo.getId('master'),
                 this._crossSigningInfo.userId,
             );
 
             // encrypt secret, based on the algorithm
-            switch (keyInfoContent.algorithm) {
+            switch (keyInfo.algorithm) {
             case SECRET_STORAGE_ALGORITHM_V1:
             {
                 const encryption = new global.Olm.PkEncryption();
                 try {
-                    encryption.set_recipient_key(keyInfoContent.pubkey);
+                    encryption.set_recipient_key(keyInfo.pubkey);
                     encrypted[keyId] = encryption.encrypt(secret);
                 } finally {
                     encryption.free();
@@ -222,7 +229,7 @@ export default class SecretStorage extends EventEmitter {
             }
             default:
                 logger.warn("unknown algorithm for secret storage key " + keyId
-                            + ": " + keyInfoContent.algorithm);
+                            + ": " + keyInfo.algorithm);
                 // do nothing if we don't understand the encryption algorithm
             }
         }
@@ -246,10 +253,39 @@ export default class SecretStorage extends EventEmitter {
      */
     storePassthrough(name, keyId) {
         return this._baseApis.setAccountData(name, {
-            [keyId]: {
-                passthrough: true,
+            encrypted: {
+                [keyId]: {
+                    passthrough: true,
+                },
             },
         });
+    }
+
+    /**
+     * Temporary method to fix up existing accounts where secrets
+     * are incorrectly stored without the 'encrypted' level
+     *
+     * @param {string} name The name of the secret
+     * @param {object} secretInfo The account data object
+     * @returns {object} The fixed object or null if no fix was performed
+     */
+    async _fixupStoredSecret(name, secretInfo) {
+        // We assume the secret was only stored passthrough for 1
+        // key - this was all the broken code supported.
+        const keys = Object.keys(secretInfo);
+        if (
+            keys.length === 1 && keys[0] !== 'encrypted' &&
+            secretInfo[keys[0]].passthrough
+        ) {
+            const hasKey = await this.hasKey(keys[0]);
+            if (hasKey) {
+                console.log("Fixing up passthrough secret: " + name);
+                await this.storePassthrough(name, keys[0]);
+                const newData = await this._baseApis.getAccountDataFromServer(name);
+                return newData;
+            }
+        }
+        return null;
     }
 
     /**
@@ -260,29 +296,34 @@ export default class SecretStorage extends EventEmitter {
      * @return {string} the contents of the secret
      */
     async get(name) {
-        const secretInfo = this._baseApis.getAccountData(name);
+        let secretInfo = await this._baseApis.getAccountDataFromServer(name);
         if (!secretInfo) {
             return;
         }
-
-        const secretContent = secretInfo.getContent();
-
-        if (!secretContent.encrypted) {
-            throw new Error("Content is not encrypted!");
+        if (!secretInfo.encrypted) {
+            // try to fix it up
+            secretInfo = await this._fixupStoredSecret(name, secretInfo);
+            if (!secretInfo || !secretInfo.encrypted) {
+                throw new Error("Content is not encrypted!");
+            }
         }
 
         // get possible keys to decrypt
         const keys = {};
-        for (const keyId of Object.keys(secretContent.encrypted)) {
+        for (const keyId of Object.keys(secretInfo.encrypted)) {
             // get key information from key storage
-            const keyInfo = this._baseApis.getAccountData(
+            const keyInfo = await this._baseApis.getAccountDataFromServer(
                 "m.secret_storage.key." + keyId,
-            ).getContent();
-            const encInfo = secretContent.encrypted[keyId];
+            );
+            const encInfo = secretInfo.encrypted[keyId];
             switch (keyInfo.algorithm) {
             case SECRET_STORAGE_ALGORITHM_V1:
-                if (keyInfo.pubkey && encInfo.ciphertext && encInfo.mac
-                    && encInfo.ephemeral) {
+                if (
+                    keyInfo.pubkey && (
+                        (encInfo.ciphertext && encInfo.mac && encInfo.ephemeral) ||
+                        encInfo.passthrough
+                    )
+                ) {
                     keys[keyId] = keyInfo;
                 }
                 break;
@@ -295,9 +336,9 @@ export default class SecretStorage extends EventEmitter {
         let decryption;
         try {
             // fetch private key from app
-            [keyId, decryption] = await this._getSecretStorageKey(keys);
+            [keyId, decryption] = await this._getSecretStorageKey(keys, name);
 
-            const encInfo = secretContent.encrypted[keyId];
+            const encInfo = secretInfo.encrypted[keyId];
 
             // We don't actually need the decryption object if it's a passthrough
             // since we just want to return the key itself.
@@ -323,32 +364,29 @@ export default class SecretStorage extends EventEmitter {
      *
      * @return {boolean} whether or not the secret is stored
      */
-    isStored(name, checkKey) {
+    async isStored(name, checkKey) {
         // check if secret exists
-        const secretInfo = this._baseApis.getAccountData(name);
-        if (!secretInfo) {
-            return false;
+        let secretInfo = await this._baseApis.getAccountDataFromServer(name);
+        if (!secretInfo) return false;
+        if (!secretInfo.encrypted) {
+            // try to fix it up
+            secretInfo = await this._fixupStoredSecret(name, secretInfo);
+            if (!secretInfo || !secretInfo.encrypted) {
+                return false;
+            }
         }
 
         if (checkKey === undefined) checkKey = true;
 
-        const secretContent = secretInfo.getContent();
-
-        if (!secretContent.encrypted) {
-            return false;
-        }
-
         // check if secret is encrypted by a known/trusted secret and
         // encryption looks sane
-        for (const keyId of Object.keys(secretContent.encrypted)) {
+        for (const keyId of Object.keys(secretInfo.encrypted)) {
             // get key information from key storage
-            const keyEvent = this._baseApis.getAccountData(
+            const keyInfo = await this._baseApis.getAccountDataFromServer(
                 "m.secret_storage.key." + keyId,
             );
-            if (!keyEvent) return false;
-            const keyInfo = keyEvent.getContent();
             if (!keyInfo) return false;
-            const encInfo = secretContent.encrypted[keyId];
+            const encInfo = secretInfo.encrypted[keyId];
             if (checkKey) {
                 pkVerify(
                     keyInfo,
@@ -356,6 +394,11 @@ export default class SecretStorage extends EventEmitter {
                     this._crossSigningInfo.userId,
                 );
             }
+
+            // We don't actually need the decryption object if it's a passthrough
+            // since we just want to return the key itself.
+            if (encInfo.passthrough) return true;
+
             switch (keyInfo.algorithm) {
             case SECRET_STORAGE_ALGORITHM_V1:
                 if (keyInfo.pubkey && encInfo.ciphertext && encInfo.mac
@@ -544,12 +587,12 @@ export default class SecretStorage extends EventEmitter {
         }
     }
 
-    async _getSecretStorageKey(keys) {
+    async _getSecretStorageKey(keys, name) {
         if (!this._cryptoCallbacks.getSecretStorageKey) {
             throw new Error("No getSecretStorageKey callback supplied");
         }
 
-        const returned = await this._cryptoCallbacks.getSecretStorageKey({ keys });
+        const returned = await this._cryptoCallbacks.getSecretStorageKey({ keys }, name);
 
         if (!returned) {
             throw new Error("getSecretStorageKey callback returned falsey");

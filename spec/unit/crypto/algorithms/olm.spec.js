@@ -1,5 +1,6 @@
 /*
 Copyright 2018,2019 New Vector Ltd
+Copyright 2019 The Matrix.org Foundation C.I.C.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,14 +16,12 @@ limitations under the License.
 */
 
 import '../../../olm-loader';
-
-import MemoryCryptoStore from '../../../../lib/crypto/store/memory-crypto-store.js';
-import MockStorageApi from '../../../MockStorageApi';
-import logger from '../../../../lib/logger';
-
-import OlmDevice from '../../../../lib/crypto/OlmDevice';
-import olmlib from '../../../../lib/crypto/olmlib';
-import DeviceInfo from '../../../../lib/crypto/deviceinfo';
+import {MemoryCryptoStore} from "../../../../src/crypto/store/memory-crypto-store";
+import {MockStorageApi} from "../../../MockStorageApi";
+import {logger} from "../../../../src/logger";
+import {OlmDevice} from "../../../../src/crypto/OlmDevice";
+import * as olmlib from "../../../../src/crypto/olmlib";
+import {DeviceInfo} from "../../../../src/crypto/deviceinfo";
 
 function makeOlmDevice() {
     const mockStorage = new MockStorageApi();
@@ -42,7 +41,7 @@ async function setupSession(initiator, opponent) {
     return sid;
 }
 
-describe("OlmDecryption", function() {
+describe("OlmDevice", function() {
     if (!global.Olm) {
         logger.warn('Not running megolm unit tests: libolm not present');
         return;
@@ -80,6 +79,60 @@ describe("OlmDecryption", function() {
             expect(result.payload).toEqual(
                 "The olm or proteus is an aquatic salamander in the family Proteidae",
             );
+        });
+
+        it('exports picked account and olm sessions', async function() {
+            const sessionId = await setupSession(aliceOlmDevice, bobOlmDevice);
+
+            const exported = await bobOlmDevice.export();
+            // At this moment only Alice (the “initiator” in setupSession) has a session
+            expect(exported.sessions).toEqual([]);
+
+            const MESSAGE = (
+                "The olm or proteus is an aquatic salamander"
+                + " in the family Proteidae"
+            );
+            const ciphertext = await aliceOlmDevice.encryptMessage(
+                bobOlmDevice.deviceCurve25519Key,
+                sessionId,
+                MESSAGE,
+            );
+
+            const bobRecreatedOlmDevice = makeOlmDevice();
+            bobRecreatedOlmDevice.init({ fromExportedDevice: exported });
+
+            const decrypted = await bobRecreatedOlmDevice.createInboundSession(
+                aliceOlmDevice.deviceCurve25519Key,
+                ciphertext.type,
+                ciphertext.body,
+            );
+            expect(decrypted.payload).toEqual(MESSAGE);
+
+            const exportedAgain = await bobRecreatedOlmDevice.export();
+            // this time we expect Bob to have a session to export
+            expect(exportedAgain.sessions).toHaveLength(1);
+
+            const MESSAGE_2 = (
+                "In contrast to most amphibians,"
+                + " the olm is entirely aquatic"
+            );
+            const ciphertext2 = await aliceOlmDevice.encryptMessage(
+                bobOlmDevice.deviceCurve25519Key,
+                sessionId,
+                MESSAGE_2,
+            );
+
+            const bobRecreatedAgainOlmDevice = makeOlmDevice();
+            bobRecreatedAgainOlmDevice.init({ fromExportedDevice: exportedAgain });
+
+            // Note: "decrypted_2" does not have the same structure as "decrypted"
+            const decrypted2 = await bobRecreatedAgainOlmDevice.decryptMessage(
+                aliceOlmDevice.deviceCurve25519Key,
+                decrypted.session_id,
+                ciphertext2.type,
+                ciphertext2.body,
+            );
+            expect(decrypted2).toEqual(MESSAGE_2);
         });
 
         it("creates only one session at a time", async function() {

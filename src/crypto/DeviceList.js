@@ -15,7 +15,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-"use strict";
 
 /**
  * @module crypto/DeviceList
@@ -24,12 +23,11 @@ limitations under the License.
  */
 
 import {EventEmitter} from 'events';
-
-import logger from '../logger';
-import DeviceInfo from './deviceinfo';
+import {logger} from '../logger';
+import {DeviceInfo} from './deviceinfo';
 import {CrossSigningInfo} from './CrossSigning';
-import olmlib from './olmlib';
-import IndexedDBCryptoStore from './store/indexeddb-crypto-store';
+import * as olmlib from './olmlib';
+import {IndexedDBCryptoStore} from './store/indexeddb-crypto-store';
 import {defer, sleep} from '../utils';
 
 
@@ -63,7 +61,7 @@ const TRACKING_STATUS_UP_TO_DATE = 3;
 /**
  * @alias module:crypto/DeviceList
  */
-export default class DeviceList extends EventEmitter {
+export class DeviceList extends EventEmitter {
     constructor(baseApis, cryptoStore, olmDevice) {
         super();
 
@@ -199,16 +197,16 @@ export default class DeviceList extends EventEmitter {
             const resolveSavePromise = this._resolveSavePromise;
             this._savePromiseTime = targetTime;
             this._saveTimer = setTimeout(() => {
-                logger.log('Saving device tracking data at token ' + this._syncToken);
+                logger.log('Saving device tracking data', this._syncToken);
+
                 // null out savePromise now (after the delay but before the write),
                 // otherwise we could return the existing promise when the save has
-                // actually already happened. Likewise for the dirty flag.
+                // actually already happened.
                 this._savePromiseTime = null;
                 this._saveTimer = null;
                 this._savePromise = null;
                 this._resolveSavePromise = null;
 
-                this._dirty = false;
                 this._cryptoStore.doTxn(
                     'readwrite', [IndexedDBCryptoStore.STORE_DEVICE_DATA], (txn) => {
                         this._cryptoStore.storeEndToEndDeviceData({
@@ -219,7 +217,13 @@ export default class DeviceList extends EventEmitter {
                         }, txn);
                     },
                 ).then(() => {
+                    // The device list is considered dirty until the write
+                    // completes.
+                    this._dirty = false;
                     resolveSavePromise();
+                }, err => {
+                    logger.error('Failed to save device tracking data', this._syncToken);
+                    logger.error(err);
                 });
             }, delay);
         }
@@ -596,7 +600,7 @@ export default class DeviceList extends EventEmitter {
      *
      * @param {String[]} users  list of userIds
      *
-     * @return {module:client.Promise} resolves when all the users listed have
+     * @return {Promise} resolves when all the users listed have
      *     been updated. rejects if there was a problem updating any of the
      *     users.
      */
@@ -701,7 +705,7 @@ class DeviceListUpdateSerialiser {
      * @param {String} syncToken sync token to pass in the query request, to
      *     help the HS give the most recent results
      *
-     * @return {module:client.Promise} resolves when all the users listed have
+     * @return {Promise} resolves when all the users listed have
      *     been updated. rejects if there was a problem updating any of the
      *     users.
      */
