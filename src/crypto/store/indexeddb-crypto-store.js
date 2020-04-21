@@ -226,6 +226,17 @@ export class IndexedDBCryptoStore {
     }
 
     /**
+     * Look for room key requests by state –
+     * unlike above, return a list of all entries in one state.
+     *
+     * @param {Number} wantedState
+     * @return {Promise<Array<*>>} Returns an array of requests in the given state
+     */
+    getAllOutgoingRoomKeyRequestsByState(wantedState) {
+        return this._backend.getAllOutgoingRoomKeyRequestsByState(wantedState);
+    }
+
+    /**
      * Look for room key requests by target device and state
      *
      * @param {string} userId Target user ID
@@ -309,6 +320,15 @@ export class IndexedDBCryptoStore {
     }
 
     /**
+     * @param {*} txn An active transaction. See doTxn().
+     * @param {function(string)} func Called with the private key
+     * @param {string} type A key type
+     */
+    getSecretStorePrivateKey(txn, func, type) {
+        this._backend.getSecretStorePrivateKey(txn, func, type);
+    }
+
+    /**
      * Write the cross-signing keys back to the store
      *
      * @param {*} txn An active transaction. See doTxn().
@@ -316,6 +336,17 @@ export class IndexedDBCryptoStore {
      */
     storeCrossSigningKeys(txn, keys) {
         this._backend.storeCrossSigningKeys(txn, keys);
+    }
+
+    /**
+     * Write the cross-signing private keys back to the store
+     *
+     * @param {*} txn An active transaction. See doTxn().
+     * @param {string} type The type of cross-signing private key to store
+     * @param {string} key keys object as getCrossSigningKeys()
+     */
+    storeSecretStorePrivateKey(txn, type, key) {
+        this._backend.storeSecretStorePrivateKey(txn, type, key);
     }
 
     // Olm sessions

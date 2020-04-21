@@ -27,3 +27,10 @@ export class InvalidCryptoStoreError extends Error {
         return instance;
     }
 }
+
+export class KeySignatureUploadError extends Error {
+  constructor(message, value) {
+    super(message);
+    this.value = value;
+  }
+}

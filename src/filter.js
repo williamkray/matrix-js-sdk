@@ -51,12 +51,6 @@ export class Filter {
         lazy_load_members: true,
     };
 
-    static LAZY_LOADING_SYNC_FILTER = {
-        room: {
-            state: Filter.LAZY_LOADING_MESSAGES_FILTER,
-        },
-    };
-
     constructor(userId, filterId) {
         this.userId = userId;
         this.filterId = filterId;
@@ -96,7 +90,8 @@ export class Filter {
         //     "state": {
         //       "types": ["m.room.*"],
         //       "not_rooms": ["!726s6s6q:example.com"],
-        //     },
+        //       "lazy_load_members": true,
+    //     },
         //     "timeline": {
         //       "limit": 10,
         //       "types": ["m.room.message"],
@@ -177,7 +172,9 @@ export class Filter {
         setProp(this.definition, "room.timeline.limit", limit);
     }
 
-    /**
+    Filter.prototype.setLazyLoadMembers = function(enabled) {
+    setProp(this.definition, "room.state.lazy_load_members", !!enabled);
+};/**
      * Control whether left rooms should be included in responses.
      * @param {boolean} includeLeave True to make rooms the user has left appear
      * in responses.

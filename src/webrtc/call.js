@@ -168,29 +168,26 @@ export class MatrixCall extends EventEmitter {
      * to render the local camera preview.
      * @throws If you have not specified a listener for 'error' events.
      */
-    placeScreenSharingCall(remoteVideoElement, localVideoElement) {
+    async placeScreenSharingCall(remoteVideoElement, localVideoElement) {
         debuglog("placeScreenSharingCall");
         checkForErrorListener(this);
-        const screenConstraints = _getScreenSharingConstraints(this);
-        if (!screenConstraints) {
-            return;
-        }
         this.localVideoElement = localVideoElement;
         this.remoteVideoElement = remoteVideoElement;
         const self = this;
-        this.webRtc.getUserMedia(screenConstraints, function(stream) {
-            self.screenSharingStream = stream;
+        try {
+            self.screenSharingStream = await this.webRtc.getDisplayMedia({'audio': false});
             debuglog("Got screen stream, requesting audio stream...");
             const audioConstraints = _getUserMediaVideoContraints('voice');
             _placeCallWithConstraints(self, audioConstraints);
-        }, function(err) {
+        } catch(err) {
             self.emit("error",
                 callError(
                     MatrixCall.ERR_NO_USER_MEDIA,
                     "Failed to get screen-sharing stream: " + err,
                 ),
             );
-        });
+        }
+
         this.type = 'video';
         _tryPlayRemoteStream(this);
     }
@@ -1232,31 +1229,6 @@ const _createPeerConnection = function(self) {
     return pc;
 };
 
-const _getScreenSharingConstraints = function(call) {
-    const screen = global.screen;
-    if (!screen) {
-        call.emit("error", callError(
-            MatrixCall.ERR_NO_USER_MEDIA,
-            "Couldn't determine screen sharing constaints.",
-        ));
-        return;
-    }
-
-    return {
-        video: {
-            mediaSource: 'screen',
-            mandatory: {
-                chromeMediaSource: "screen",
-                chromeMediaSourceId: "" + Date.now(),
-                maxWidth: screen.width,
-                maxHeight: screen.height,
-                minFrameRate: 1,
-                maxFrameRate: 10,
-            },
-        },
-    };
-};
-
 const _getUserMediaVideoContraints = function(callType) {
     const isWebkit = !!global.window.navigator.webkitGetUserMedia;
 
@@ -1370,6 +1342,14 @@ export function createNewMatrixCall(client, roomId, options) {
         webRtc.getUserMedia = function() {
             return getUserMedia.apply(w.navigator, arguments);
         };
+    }
+
+    const getDisplayMedia = (
+        w.navigator.mediaDevices && w.navigator.mediaDevices.getDisplayMedia ||
+        w.navigator.getDisplayMedia
+    );
+    if (getDisplayMedia) {
+        webRtc.getDisplayMedia = getDisplayMedia.bind(w.navigator.mediaDevices);
     }
 
     // Firefox throws on so little as accessing the RTCPeerConnection when operating in

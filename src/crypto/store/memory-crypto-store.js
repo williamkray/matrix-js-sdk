@@ -33,6 +33,8 @@ export class MemoryCryptoStore {
         this._outgoingRoomKeyRequests = [];
         this._account = null;
         this._crossSigningKeys = null;
+        this._privateKeys = {};
+        this._backupKeys = {};
 
         // Map of {devicekey -> {sessionId -> session pickle}}
         this._sessions = {};
@@ -164,6 +166,19 @@ export class MemoryCryptoStore {
         return Promise.resolve(null);
     }
 
+    /**
+     *
+     * @param {Number} wantedState
+     * @return {Promise<Array<*>>} All OutgoingRoomKeyRequests in state
+     */
+    getAllOutgoingRoomKeyRequestsByState(wantedState) {
+        return Promise.resolve(
+            this._outgoingRoomKeyRequests.filter(
+                (r) => r.state == wantedState,
+            ),
+        );
+    }
+
     getOutgoingRoomKeyRequestsByTarget(userId, deviceId, wantedStates) {
         const results = [];
 
@@ -255,8 +270,17 @@ export class MemoryCryptoStore {
         func(this._crossSigningKeys);
     }
 
+    getSecretStorePrivateKey(txn, func, type) {
+        const result = this._privateKeys[type];
+        return func(result || null);
+    }
+
     storeCrossSigningKeys(txn, keys) {
         this._crossSigningKeys = keys;
+    }
+
+    storeSecretStorePrivateKey(txn, type, key) {
+        this._privateKeys[type] = key;
     }
 
     // Olm Sessions

@@ -264,7 +264,25 @@ class OlmDecryption extends DecryptionAlgorithm {
      * @return {string} payload, if decrypted successfully.
      */
     async _decryptMessage(theirDeviceIdentityKey, message) {
-        const sessionIds =
+        // This is a wrapper that serialises decryptions of prekey messages, because
+    // otherwise we race between deciding we have no active sessions for the message
+    // and creating a new one, which we can only do once because it removes the OTK.
+    if (message.type !== 0) {
+        // not a prekey message: we can safely just try & decrypt it
+        return this._reallyDecryptMessage(theirDeviceIdentityKey, message);
+    } else {
+        const myPromise = this._olmDevice._olmPrekeyPromise.then(() => {
+            return this._reallyDecryptMessage(theirDeviceIdentityKey, message);
+        });
+        // we want the error, but don't propagate it to the next decryption
+        this._olmDevice._olmPrekeyPromise = myPromise.catch(() => {});
+        return await myPromise;
+    }
+};
+
+OlmDecryption.prototype._reallyDecryptMessage = async function(
+    theirDeviceIdentityKey, message,
+) {const sessionIds =
             await this._olmDevice.getSessionIdsForDevice(theirDeviceIdentityKey);
         // try each session in turn.
         const decryptionErrors = {};
