@@ -21,6 +21,7 @@ limitations under the License.
  */
 
 import unhomoglyph from 'unhomoglyph';
+import {ConnectionError} from "./http-api";
 
 /**
  * Encode a dictionary of query parameters.
@@ -733,4 +734,18 @@ export async function promiseMapSeries<T>(
 
 export function promiseTry<T>(fn: () => T): Promise<T> {
     return new Promise((resolve) => resolve(fn()));
+}
+
+// We need to be able to access the Node.js crypto library from within the
+// Matrix SDK without needing to `require("crypto")`, which will fail in
+// browsers.  So `index.ts` will call `setCrypto` to store it, and when we need
+// it, we can call `getCrypto`.
+let crypto: Object;
+
+export function setCrypto(c: Object) {
+    crypto = c;
+}
+
+export function getCrypto(): Object {
+    return crypto;
 }

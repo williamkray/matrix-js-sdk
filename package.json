@@ -1,6 +1,6 @@
 {
   "name": "matrix-js-sdk",
-  "version": "5.1.0",
+  "version": "6.0.0-rc.2",
   "description": "Matrix Client-Server SDK for Javascript",
   "scripts": {
     "prepare": "yarn build",
@@ -14,7 +14,7 @@
     "build:minify-browser": "terser dist/browser-matrix.js --compress --mangle --source-map --output dist/browser-matrix.min.js",
     "gendoc": "jsdoc -c jsdoc.json -P package.json",
     "lint": "yarn lint:types && yarn lint:ts && yarn lint:js",
-    "lint:js": "eslint --max-warnings 93 src spec",
+    "lint:js": "eslint --max-warnings 81 src spec",
     "lint:types": "tsc --noEmit",
     "lint:ts": "tslint --project ./tsconfig.json -t stylish",
     "test": "jest spec/ --coverage --testEnvironment node",
