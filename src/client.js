@@ -1310,7 +1310,6 @@ wrapCryptoFuncs(MatrixClient, [
     "bootstrapSecretStorage",
     "addSecretStorageKey",
     "hasSecretStorageKey",
-    "secretStorageKeyNeedsUpgrade",
     "storeSecret",
     "getSecret",
     "isSecretStored",
@@ -1364,7 +1363,8 @@ MatrixClient.prototype.cancelAndResendEventRoomKeyRequest = function(event) {
 };
 
 /**
- * Enable end-to-end encryption for a room.
+ * Enable end-to-end encryption for a room. This does not modify room state.
+ * Any messages sent before the returned promise resolves will be sent unencrypted.
  * @param {string} roomId The room ID to enable encryption in.
  * @param {object} config The encryption config for the room.
  * @return {Promise} A promise that will resolve when encryption is set up.
@@ -1506,11 +1506,15 @@ MatrixClient.prototype.isKeyBackupTrusted = function(info) {
 
 /**
  * @returns {bool} true if the client is configured to back up keys to
- *     the server, otherwise false.
+ *     the server, otherwise false. If we haven't completed a successful check
+ *     of key backup status yet, returns null.
  */
 MatrixClient.prototype.getKeyBackupEnabled = function() {
     if (this._crypto === null) {
         throw new Error("End-to-end encryption disabled");
+    }
+    if (!this._crypto._checkedForBackup) {
+        return null;
     }
     return Boolean(this._crypto.backupKey);
 };
@@ -2480,6 +2484,7 @@ MatrixClient.prototype._sendCompleteEvent = function(roomId, eventObject, txnId,
     const localEvent = new MatrixEvent(Object.assign(eventObject, {
         event_id: "~" + roomId + ":" + txnId,
         user_id: this.credentials.userId,
+        sender: this.credentials.userId,
         room_id: roomId,
         origin_server_ts: new Date().getTime(),
     }));

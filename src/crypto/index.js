@@ -225,6 +225,11 @@ export function Crypto(baseApis, sessionStore, userId, deviceId,
     this._toDeviceVerificationRequests = new ToDeviceRequests();
     this._inRoomVerificationRequests = new InRoomRequests();
 
+    // This flag will be unset whilst the client processes a sync response
+    // so that we don't start requesting keys until we've actually finished
+    // processing the response.
+    this._sendKeyRequestsImmediately = false;
+
     const cryptoCallbacks = this._baseApis._cryptoCallbacks || {};
     const cacheCallbacks = createCryptoStoreCacheCallbacks(cryptoStore);
 
@@ -235,7 +240,7 @@ export function Crypto(baseApis, sessionStore, userId, deviceId,
     );
 
     this._secretStorage = new SecretStorage(
-        baseApis, cryptoCallbacks, this._crossSigningInfo,
+        baseApis, cryptoCallbacks,
     );
 
     // Assuming no app-supplied callback, default to getting from SSSS.
@@ -555,8 +560,6 @@ Crypto.prototype.bootstrapSecretStorage = async function({
                 keyInfo.iv = iv;
                 keyInfo.mac = mac;
 
-                await this._crossSigningInfo.signObject(keyInfo, 'master');
-
                 await this._baseApis.setAccountData(
                     `m.secret_storage.key.${keyId}`, keyInfo,
                 );
@@ -645,64 +648,6 @@ Crypto.prototype.bootstrapSecretStorage = async function({
                 undefined, keyBackupInfo,
                 {prefix: httpApi.PREFIX_UNSTABLE},
             );
-        } else if (!(Object.values(decryptionKeys).some(
-            info => info.algorithm === SECRET_STORAGE_ALGORITHM_V1_AES,
-        ))) {
-            // we have an asymmetric SSSS
-            logger.log("Asymmetric SSSS found. Switching SSSS to symmetric");
-            const keys = {};
-            // fetch the cross-signing private keys (needed to sign the new
-            // SSSS key, and so that we can re-encrypt them with the new key).
-            // We store the cross-signing keys, and temporarily set a callback
-            // so that when the private keys are needed while setting things
-            // up, we can provide it.
-            this._baseApis._cryptoCallbacks.getCrossSigningKey =
-                name => crossSigningPrivateKeys[name];
-            for (const type of ["master", "self_signing", "user_signing"]) {
-                const secretName = `m.cross_signing.${type}`;
-                const secret = await this.getSecret(secretName);
-                keys[type] = secret;
-                crossSigningPrivateKeys[type]
-                    = new Uint8Array(olmlib.decodeBase64(secret));
-            }
-
-            await this.checkOwnCrossSigningTrust();
-
-            const opts = {};
-
-            let oldKey = null;
-            for (const [keyId, keyInfo] of Object.entries(decryptionKeys)) {
-                // See if the old key was generated from a passphrase.  If
-                // yes, use the same settings.
-                if (keyId in ssssKeys) {
-                    oldKey = ssssKeys[keyId];
-                    if (keyInfo.passphrase) {
-                        opts.passphrase = keyInfo.passphrase;
-                    }
-                    break;
-                }
-            }
-
-            // create new symmetric SSSS key
-            newKeyId = await createSSSS(opts, oldKey);
-
-            logger.log("re-encrypting cross-signing keys");
-            // re-encrypt all the cross-signing keys with the new key
-            for (const type of ["master", "self_signing", "user_signing"]) {
-                const secretName = `m.cross_signing.${type}`;
-                await this.storeSecret(secretName, keys[type], [newKeyId]);
-            }
-
-            if (await this.isSecretStored("m.megolm_backup.v1", false)) {
-                // re-encrypt the backup key if we had one too
-                logger.log("re-encrypting backup key");
-                const backupKey = await this.getSecret("m.megolm_backup.v1");
-
-                await this.storeSecret(
-                    "m.megolm_backup.v1", fixBackupKey(backupKey) || backupKey,
-                    [newKeyId],
-                );
-            }
         } else if (!this._crossSigningInfo.getId()) {
             // we have SSSS, but we don't know if the server's cross-signing
             // keys should be trusted
@@ -735,11 +680,6 @@ Crypto.prototype.bootstrapSecretStorage = async function({
         // See also https://github.com/vector-im/riot-web/issues/11635
         if (Object.keys(crossSigningPrivateKeys).length) {
             logger.log("Storing cross-signing private keys in secret storage");
-            // SSSS expects its keys to be signed by cross-signing master key.
-            // Since we have just reset cross-signing keys, we need to re-sign the
-            // SSSS default key with the new cross-signing master key so that the
-            // following storage step can proceed.
-            await this._secretStorage.signKey();
             // Assuming no app-supplied callback, default to storing in SSSS.
             if (!appCallbacks.saveCrossSigningKeys) {
                 await CrossSigningInfo.storeInSecretStorage(
@@ -824,10 +764,6 @@ Crypto.prototype.addSecretStorageKey = function(algorithm, opts, keyID) {
 
 Crypto.prototype.hasSecretStorageKey = function(keyID) {
     return this._secretStorage.hasKey(keyID);
-};
-
-Crypto.prototype.secretStorageKeyNeedsUpgrade = function(keyID) {
-    return this._secretStorage.keyNeedsUpgrade(keyID);
 };
 
 Crypto.prototype.getSecretStorageKey = function(keyID) {
@@ -1477,8 +1413,9 @@ Crypto.prototype._checkAndStartKeyBackup = async function() {
         backupInfo = await this._baseApis.getKeyBackupVersion();
     } catch (e) {
         logger.log("Error checking for active key backup", e);
-        if (e.httpStatus / 100 === 4) {
-            // well that's told us. we won't try again.
+        if (e.httpStatus === 404) {
+            // 404 is returned when the key backup does not exist, so that
+            // counts as successfully checking.
             this._checkedForBackup = true;
         }
         return null;
@@ -2898,9 +2835,13 @@ Crypto.prototype.handleDeviceListChanges = async function(syncData, syncDeviceLi
  * @return {Promise} a promise that resolves when the key request is queued
  */
 Crypto.prototype.requestRoomKey = function(requestBody, recipients, resend=false) {
-    return this._outgoingRoomKeyRequestManager.sendRoomKeyRequest(
+    return this._outgoingRoomKeyRequestManager.queueRoomKeyRequest(
         requestBody, recipients, resend,
-    ).catch((e) => {
+    ).then(() => {
+        if (this._sendKeyRequestsImmediately) {
+            this._outgoingRoomKeyRequestManager.sendQueuedRequests();
+        }
+    }).catch((e) => {
         // this normally means we couldn't talk to the store
         logger.error(
             'Error requesting key for event', e,
@@ -2965,6 +2906,8 @@ Crypto.prototype.onSyncWillProcess = async function(syncData) {
         this._deviceList.startTrackingDeviceList(this._userId);
         this._roomDeviceTrackingState = {};
     }
+
+    this._sendKeyRequestsImmediately = false;
 };
 
 /**
@@ -2996,6 +2939,14 @@ Crypto.prototype.onSyncCompleted = async function(syncData) {
     if (!syncData.catchingUp) {
         _maybeUploadOneTimeKeys(this);
         this._processReceivedRoomKeyRequests();
+
+        // likewise don't start requesting keys until we've caught up
+        // on to_device messages, otherwise we'll request keys that we're
+        // just about to get.
+        this._outgoingRoomKeyRequestManager.sendQueuedRequests();
+
+        // Sync has finished so send key requests straight away.
+        this._sendKeyRequestsImmediately = true;
     }
 };
 
@@ -3512,6 +3463,19 @@ Crypto.prototype._processReceivedRoomKeyRequest = async function(req) {
                 " with device " + userId + ":" + device.deviceId, e,
             );
         }
+        return;
+    }
+
+    if (deviceId !== this._deviceId) {
+        // We'll always get these because we send room key requests to
+        // '*' (ie. 'all devices') which includes the sending device,
+        // so ignore requests from ourself because apart from it being
+        // very silly, it won't work because an Olm session cannot send
+        // messages to itself.
+        // The log here is probably superfluous since we know this will
+        // always happen, but let's log anyway for now just in case it
+        // causes issues.
+        logger.log("Ignoring room key request from ourselves");
         return;
     }
 

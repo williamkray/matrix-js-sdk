@@ -36,9 +36,15 @@ function checkPayloadLength(payloadString) {
         // Note that even if we manage to do the encryption, the message send may fail,
         // because by the time we've wrapped the ciphertext in the event object, it may
         // exceed 65K. But at least we won't just fail with "abort()" in that case.
-        throw new Error("Message too long (" + payloadString.length + " bytes). " +
+        const err = new Error("Message too long (" + payloadString.length + " bytes). " +
                         "The maximum for an encrypted message is " +
                         MAX_PLAINTEXT_LENGTH + " bytes.");
+        // TODO: [TypeScript] We should have our own error types
+        err.data = {
+            errcode: "M_TOO_LARGE",
+            error: "Payload too large for encrypted message",
+        };
+        throw err;
     }
 }
 
@@ -1031,6 +1037,11 @@ OlmDevice.prototype.addInboundGroupSession = async function(
                                 return;
                             }
                         }
+
+                        logger.info(
+                            "Storing megolm session " + senderKey + "/" + sessionId +
+                            " with first index " + session.first_known_index(),
+                        );
 
                         const sessionData = {
                             room_id: roomId,
