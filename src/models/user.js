@@ -104,6 +104,7 @@ User.prototype.setPresenceEvent = function(event) {
 
     if (event.getContent().status_msg) {
       this.presenceStatusMsg = event.getContent().status_msg;
+      eventsToFire.push("User.presenceStatusMsg");
     }
     if (event.getContent().displayname) {
         this.displayName = event.getContent().displayname;
