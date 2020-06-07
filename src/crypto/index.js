@@ -56,6 +56,7 @@ import {ToDeviceChannel, ToDeviceRequests} from "./verification/request/ToDevice
 import * as httpApi from "../http-api";
 import {IllegalMethod} from "./verification/IllegalMethod";
 import {KeySignatureUploadError} from "../errors";
+import {decryptAES, encryptAES} from './aes';
 
 const DeviceVerification = DeviceInfo.DeviceVerification;
 
@@ -231,7 +232,7 @@ export function Crypto(baseApis, sessionStore, userId, deviceId,
     this._sendKeyRequestsImmediately = false;
 
     const cryptoCallbacks = this._baseApis._cryptoCallbacks || {};
-    const cacheCallbacks = createCryptoStoreCacheCallbacks(cryptoStore);
+    const cacheCallbacks = createCryptoStoreCacheCallbacks(cryptoStore, this._olmDevice);
 
     this._crossSigningInfo = new CrossSigningInfo(
         userId,
@@ -264,6 +265,7 @@ utils.inherits(Crypto, EventEmitter);
 Crypto.prototype.init = async function(opts) {
     const {
         exportedOlmDevice,
+        pickleKey,
     } = opts || {};
 
     logger.log("Crypto: initialising Olm...");
@@ -273,7 +275,7 @@ Crypto.prototype.init = async function(opts) {
             ? "Crypto: initialising Olm device from exported device..."
             : "Crypto: initialising Olm device...",
     );
-    await this._olmDevice.init({ fromExportedDevice: exportedOlmDevice });
+    await this._olmDevice.init({ fromExportedDevice: exportedOlmDevice, pickleKey });
     logger.log("Crypto: loading device list...");
     await this._deviceList.load();
 
@@ -751,7 +753,7 @@ Crypto.prototype.bootstrapSecretStorage = async function({
  *
  */
 export function fixBackupKey(key) {
-    if (key.indexOf(",") < 0) {
+    if (typeof key !== "string" || key.indexOf(",") < 0) {
         return null;
     }
     const fixedKey = Uint8Array.from(key.split(","), x => parseInt(x));
@@ -842,9 +844,14 @@ Crypto.prototype.getSessionBackupPrivateKey = async function() {
     });
 
     // make sure we have a Uint8Array, rather than a string
-    if (key && typeof(key === "string")) {
+    if (key && typeof key === "string") {
         key = new Uint8Array(olmlib.decodeBase64(fixBackupKey(key) || key));
         await this.storeSessionBackupPrivateKey(key);
+    }
+    if (key && key.ciphertext) {
+        const pickleKey = Buffer.from(this._olmDevice._pickleKey);
+        const decrypted = await decryptAES(key, pickleKey, "m.megolm_backup.v1");
+        key = olmlib.decodeBase64(decrypted);
     }
     return key;
 };
@@ -858,6 +865,8 @@ Crypto.prototype.storeSessionBackupPrivateKey = async function(key) {
     if (!(key instanceof Uint8Array)) {
         throw new Error(`storeSessionBackupPrivateKey expects Uint8Array, got ${key}`);
     }
+    const pickleKey = Buffer.from(this._olmDevice._pickleKey);
+    key = await encryptAES(olmlib.encodeBase64(key), pickleKey, "m.megolm_backup.v1");
     return this._cryptoStore.doTxn(
         'readwrite',
         [IndexedDBCryptoStore.STORE_ACCOUNT],
@@ -3466,7 +3475,7 @@ Crypto.prototype._processReceivedRoomKeyRequest = async function(req) {
         return;
     }
 
-    if (deviceId !== this._deviceId) {
+    if (deviceId === this._deviceId) {
         // We'll always get these because we send room key requests to
         // '*' (ie. 'all devices') which includes the sending device,
         // so ignore requests from ourself because apart from it being

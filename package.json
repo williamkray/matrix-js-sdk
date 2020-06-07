@@ -1,6 +1,6 @@
 {
   "name": "matrix-js-sdk",
-  "version": "6.1.0",
+  "version": "6.2.1",
   "description": "Matrix Client-Server SDK for Javascript",
   "scripts": {
     "prepare": "yarn build",
@@ -35,6 +35,7 @@
   "author": "matrix.org",
   "license": "Apache-2.0",
   "files": [
+    "dist",
     "lib",
     "src",
     "git-revision.txt",
