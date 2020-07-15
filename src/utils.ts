@@ -50,7 +50,7 @@ export function encodeParams(params: Record<string, string>): string {
  * @return {string} The result of replacing all template variables e.g. '/foo/baz'.
  */
 export function encodeUri(pathTemplate: string,
-                          variables: Record<string, string>): string {
+                          variables: Record<string, string> = {}): string {
     for (const key in variables) {
         if (!variables.hasOwnProperty(key)) {
             continue;
@@ -365,14 +365,13 @@ export function deepCompare(x: any, y: any): boolean {
  * that the latter doesn't copy inherited properties.
  *
  * @param {Object} target  The object that will receive new properties
- * @param {...Object} source  Objects from which to copy properties
+ * @param {...Object} sources  Objects from which to copy properties
  *
  * @return {Object} target
  */
-export function extend() {
-    const target = arguments[0] || {};
-    for (let i = 1; i < arguments.length; i++) {
-        const source = arguments[i];
+export function extend(target = {}, ...sources: Object[]) {
+    for (let i = 0; i < sources.length; i++) {
+        const source = sources[i];
         if (!source) continue;
         for (const propName in source) { // eslint-disable-line guard-for-in
             target[propName] = source[propName];

@@ -14,12 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+import Olm from "olm";
 export {};
 
 declare global {
     namespace NodeJS {
         interface Global {
             localStorage: Storage;
+            Olm: Olm;
         }
     }
 }

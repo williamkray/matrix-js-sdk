@@ -14,7 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-export const SERVICE_TYPES = Object.freeze({
-    IS: 'SERVICE_TYPE_IS', // An Identity Service
-    IM: 'SERVICE_TYPE_IM', // An Integration Manager
-});
+export enum ServiceType {
+    IS = "SERVICE_TYPE_IS", // An Identity Service
+    IM = "SERVICE_TYPE_IM",  // An Integration Manager
+}
+
+export const SERVICE_TYPES = ServiceType; // backwards-compatible export
