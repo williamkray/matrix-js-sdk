@@ -140,6 +140,11 @@ export abstract class MatrixBaseApis extends EventEmitter {
         this.http = new MatrixHttpApi(this, httpOpts);
     }
 
+    // backwards compatibility
+    get _http() {
+        return this.http;
+    }
+
     abstract isVersionSupported(version: string): Promise<boolean>;
 
     /**

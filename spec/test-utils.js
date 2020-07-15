@@ -357,7 +357,7 @@ export function setHttpResponses(
     );
 
     const httpReq = httpResponseObj.request.bind(httpResponseObj);
-    client._http = [
+    client.http = [
         "authedRequest", "authedRequestWithPrefix", "getContentUri",
         "request", "requestWithPrefix", "uploadContent",
     ].reduce((r, k) => {r[k] = jest.fn(); return r;}, {});

@@ -145,7 +145,7 @@ describe("MatrixClient", function() {
             userId: userId,
         });
         // FIXME: We shouldn't be yanking _http like this.
-        client._http = [
+        client.http = [
             "authedRequest", "getContentUri", "request", "uploadContent",
         ].reduce((r, k) => { r[k] = jest.fn(); return r; }, {});
         client._http.authedRequest.mockImplementation(httpReq);
