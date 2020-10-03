@@ -1015,7 +1015,7 @@ MegolmEncryption.prototype._getDevicesInRoom = async function(room) {
     // with them, which means that they will have announced any new devices via
     // device_lists in their /sync response.  This cache should then be maintained
     // using all the device_lists changes and left fields.
-    // See https://github.com/vector-im/riot-web/issues/2305 for details.
+    // See https://github.com/vector-im/element-web/issues/2305 for details.
     const devices = await this._crypto.downloadKeys(roomMembers, false);
     const blocked = {};
     // remove any blocked devices
@@ -1109,7 +1109,7 @@ MegolmDecryption.prototype.decryptEvent = async function(event) {
     //
     // then, if the key turns up while decryption is in progress (and
     // decryption fails), we will schedule a retry.
-    // (fixes https://github.com/vector-im/riot-web/issues/5001)
+    // (fixes https://github.com/vector-im/element-web/issues/5001)
     this._addEventToPendingList(event);
 
     let res;
@@ -1201,6 +1201,7 @@ MegolmDecryption.prototype.decryptEvent = async function(event) {
         senderCurve25519Key: res.senderKey,
         claimedEd25519Key: res.keysClaimed.ed25519,
         forwardingCurve25519KeyChain: res.forwardingCurve25519KeyChain,
+        untrusted: res.untrusted,
     };
 };
 
@@ -1548,8 +1549,11 @@ MegolmDecryption.prototype._buildKeyForwardingMessage = async function(
  * @inheritdoc
  *
  * @param {module:crypto/OlmDevice.MegolmSessionData} session
+ * @param {object} [opts={}] options for the import
+ * @param {boolean} [opts.untrusted] whether the key should be considered as untrusted
+ * @param {string} [opts.source] where the key came from
  */
-MegolmDecryption.prototype.importRoomKey = function(session) {
+MegolmDecryption.prototype.importRoomKey = function(session, opts = {}) {
     return this._olmDevice.addInboundGroupSession(
         session.room_id,
         session.sender_key,
@@ -1558,8 +1562,9 @@ MegolmDecryption.prototype.importRoomKey = function(session) {
         session.session_key,
         session.sender_claimed_keys,
         true,
+        opts.untrusted ? { untrusted: opts.untrusted } : {},
     ).then(() => {
-        if (this._crypto.backupInfo) {
+        if (this._crypto.backupInfo && opts.source !== "backup") {
             // don't wait for it to complete
             this._crypto.backupGroupSession(
                 session.room_id,

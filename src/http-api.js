@@ -651,12 +651,10 @@ MatrixHttpApi.prototype = {
 
         const self = this;
         if (this.opts.extraParams) {
-            for (const key in this.opts.extraParams) {
-                if (!this.opts.extraParams.hasOwnProperty(key)) {
-                    continue;
-                }
-                queryParams[key] = this.opts.extraParams[key];
-            }
+            queryParams = {
+              ...queryParams,
+              ...this.opts.extraParams,
+            };
         }
 
         const headers = utils.extend({}, opts.headers || {});
@@ -890,7 +888,7 @@ function getResponseContentType(response) {
 
     try {
         return parseContentType(contentType);
-    } catch(e) {
+    } catch (e) {
         throw new Error(`Error parsing Content-Type '${contentType}': ${e}`);
     }
 }

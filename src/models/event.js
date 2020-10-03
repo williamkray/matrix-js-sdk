@@ -87,7 +87,7 @@ export const MatrixEvent = function(
     // amount of needless string duplication. This can save moderate amounts of
     // memory (~10% on a 350MB heap).
     // 'membership' at the event level (rather than the content level) is a legacy
-    // field that Riot never otherwise looks at, but it will still take up a lot
+    // field that Element never otherwise looks at, but it will still take up a lot
     // of space if we don't intern it.
     ["state_key", "type", "sender", "room_id", "membership"].forEach((prop) => {
         if (!event[prop]) {
@@ -144,6 +144,10 @@ export const MatrixEvent = function(
      */
     this._forwardingCurve25519KeyChain = [];
 
+    /* where the decryption key is untrusted
+     */
+    this._untrusted = null;
+
     /* if we have a process decrypting this event, a Promise which resolves
      * when it is finished. Normally null.
      */
@@ -160,12 +164,16 @@ export const MatrixEvent = function(
      * so it can be easily accessed from the timeline.
      */
     this.verificationRequest = null;
+
+    /* The txnId with which this event was sent if it was during this session,
+       allows for a unique ID which does not change when the event comes back down sync.
+     */
+    this._txnId = null;
 };
 utils.inherits(MatrixEvent, EventEmitter);
 
 
 utils.extend(MatrixEvent.prototype, {
-
     /**
      * Get the event_id for this event.
      * @return {string} The event ID, e.g. <code>$143350589368169JsLZx:localhost
@@ -599,6 +607,7 @@ utils.extend(MatrixEvent.prototype, {
             decryptionResult.claimedEd25519Key || null;
         this._forwardingCurve25519KeyChain =
             decryptionResult.forwardingCurve25519KeyChain || [];
+        this._untrusted = decryptionResult.untrusted || false;
     },
 
     /**
@@ -617,7 +626,7 @@ utils.extend(MatrixEvent.prototype, {
      * @return {boolean} True if this event is encrypted.
      */
     isEncrypted: function() {
-        return this.event.type === "m.room.encrypted";
+        return !this.isState() && this.event.type === "m.room.encrypted";
     },
 
     /**
@@ -687,6 +696,16 @@ utils.extend(MatrixEvent.prototype, {
      */
     getForwardingCurve25519KeyChain: function() {
         return this._forwardingCurve25519KeyChain;
+    },
+
+    /**
+     * Whether the decryption key was obtained from an untrusted source. If so,
+     * we cannot verify the authenticity of the message.
+     *
+     * @return {boolean}
+     */
+    isKeySourceUntrusted: function() {
+        return this._untrusted;
     },
 
     getUnsigned: function() {
@@ -1069,6 +1088,14 @@ utils.extend(MatrixEvent.prototype, {
 
     setVerificationRequest: function(request) {
         this.verificationRequest = request;
+    },
+
+    setTxnId(txnId) {
+        this._txnId = txnId;
+    },
+
+    getTxnId() {
+        return this._txnId;
     },
 });
 

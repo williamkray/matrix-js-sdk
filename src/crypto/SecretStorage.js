@@ -292,6 +292,11 @@ export class SecretStorage extends EventEmitter {
             }
         }
 
+        if (Object.keys(keys).length === 0) {
+            throw new Error(`Could not decrypt ${name} because none of ` +
+                `the keys it is encrypted with are for a supported algorithm`);
+        }
+
         let keyId;
         let decryption;
         try {
@@ -368,6 +373,7 @@ export class SecretStorage extends EventEmitter {
         const requestId = this._baseApis.makeTxnId();
 
         const requestControl = this._requests[requestId] = {
+            name,
             devices,
         };
         const promise = new Promise((resolve, reject) => {
@@ -531,6 +537,10 @@ export class SecretStorage extends EventEmitter {
                 return;
             }
 
+            logger.log(
+                `Successfully received secret ${requestControl.name} ` +
+                `from ${deviceInfo.deviceId}`,
+            );
             requestControl.resolve(content.secret);
         }
     }

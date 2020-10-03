@@ -1,3 +1,241 @@
+Changes in [8.4.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.4.1) (2020-09-28)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v8.4.0...v8.4.1)
+
+ * Catch exception from call event handler
+   [\#1486](https://github.com/matrix-org/matrix-js-sdk/pull/1486)
+ * Ignore invalid candidates
+   [\#1485](https://github.com/matrix-org/matrix-js-sdk/pull/1485)
+
+Changes in [8.4.0](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.4.0) (2020-09-28)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v8.4.0-rc.1...v8.4.0)
+
+ * Only sign key backup with cross-signing keys when available
+   [\#1482](https://github.com/matrix-org/matrix-js-sdk/pull/1482)
+
+Changes in [8.4.0-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.4.0-rc.1) (2020-09-23)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v8.3.0...v8.4.0-rc.1)
+
+ * If there are extraParams set, ensure that queryParams is defined
+   [\#1477](https://github.com/matrix-org/matrix-js-sdk/pull/1477)
+ * Add diagnostics to security bootstrap paths
+   [\#1475](https://github.com/matrix-org/matrix-js-sdk/pull/1475)
+ * Switch to a combination of better-docs and docdash
+   [\#1459](https://github.com/matrix-org/matrix-js-sdk/pull/1459)
+ * Undo attempts to cache private keys aggressively
+   [\#1474](https://github.com/matrix-org/matrix-js-sdk/pull/1474)
+ * Repair secret storage reset, cache keys when missing
+   [\#1472](https://github.com/matrix-org/matrix-js-sdk/pull/1472)
+ * Prevent parallel getVersions calls
+   [\#1471](https://github.com/matrix-org/matrix-js-sdk/pull/1471)
+ * Send end-of-candidates
+   [\#1473](https://github.com/matrix-org/matrix-js-sdk/pull/1473)
+ * Add a function for checking the /versions flag for forced e2ee
+   [\#1470](https://github.com/matrix-org/matrix-js-sdk/pull/1470)
+ * Add option to allow users of pantialaimon to use the SDK
+   [\#1469](https://github.com/matrix-org/matrix-js-sdk/pull/1469)
+ * Fixed Yarn broken link
+   [\#1468](https://github.com/matrix-org/matrix-js-sdk/pull/1468)
+ * some TypeScript and doc fixes
+   [\#1466](https://github.com/matrix-org/matrix-js-sdk/pull/1466)
+ * Remove Travis CI reference
+   [\#1464](https://github.com/matrix-org/matrix-js-sdk/pull/1464)
+ * Inject identity server token for 3pid invites on createRoom
+   [\#1463](https://github.com/matrix-org/matrix-js-sdk/pull/1463)
+
+Changes in [8.3.0](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.3.0) (2020-09-14)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v8.3.0-rc.1...v8.3.0)
+
+* No changes since rc.1
+
+Changes in [8.3.0-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.3.0-rc.1) (2020-09-09)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v8.2.0...v8.3.0-rc.1)
+
+ * Add missing options in ICreateClientOpts
+   [\#1452](https://github.com/matrix-org/matrix-js-sdk/pull/1452)
+ * Ensure ready functions return boolean values
+   [\#1457](https://github.com/matrix-org/matrix-js-sdk/pull/1457)
+ * Handle missing cross-signing keys gracefully
+   [\#1456](https://github.com/matrix-org/matrix-js-sdk/pull/1456)
+ * Fix eslint ts override tsx matching
+   [\#1451](https://github.com/matrix-org/matrix-js-sdk/pull/1451)
+ * Untangle cross-signing and secret storage
+   [\#1450](https://github.com/matrix-org/matrix-js-sdk/pull/1450)
+
+Changes in [8.2.0](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.2.0) (2020-09-01)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v8.2.0-rc.1...v8.2.0)
+
+## Security notice
+
+JS SDK 8.2.0 fixes an issue where encrypted state events could break incoming call handling.
+Thanks to @awesome-michael from Awesome Technologies for responsibly disclosing this via Matrix's
+Security Disclosure Policy.
+
+## All changes
+
+* No changes since rc.1
+
+Changes in [8.2.0-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.2.0-rc.1) (2020-08-26)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v8.1.0...v8.2.0-rc.1)
+
+ * Add state event check
+   [\#1449](https://github.com/matrix-org/matrix-js-sdk/pull/1449)
+ * Add method to check whether client .well-known has been fetched
+   [\#1444](https://github.com/matrix-org/matrix-js-sdk/pull/1444)
+ * Handle auth errors during cross-signing key upload
+   [\#1443](https://github.com/matrix-org/matrix-js-sdk/pull/1443)
+ * Don't fail if the requested audio output isn't available
+   [\#1448](https://github.com/matrix-org/matrix-js-sdk/pull/1448)
+ * Fix logging failures
+   [\#1447](https://github.com/matrix-org/matrix-js-sdk/pull/1447)
+ * Log the constraints we pass to getUserMedia
+   [\#1446](https://github.com/matrix-org/matrix-js-sdk/pull/1446)
+ * Use SAS emoji data from matrix-doc
+   [\#1440](https://github.com/matrix-org/matrix-js-sdk/pull/1440)
+
+Changes in [8.1.0](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.1.0) (2020-08-17)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v8.1.0-rc.1...v8.1.0)
+
+* No changes since rc.1
+
+Changes in [8.1.0-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.1.0-rc.1) (2020-08-13)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v8.0.1...v8.1.0-rc.1)
+
+ * Update on Promises
+   [\#1438](https://github.com/matrix-org/matrix-js-sdk/pull/1438)
+ * Store and request master cross-signing key
+   [\#1437](https://github.com/matrix-org/matrix-js-sdk/pull/1437)
+ * Filter out non-string display names
+   [\#1433](https://github.com/matrix-org/matrix-js-sdk/pull/1433)
+ * Bump elliptic from 6.5.2 to 6.5.3
+   [\#1427](https://github.com/matrix-org/matrix-js-sdk/pull/1427)
+ * Replace Riot with Element in docs and comments
+   [\#1431](https://github.com/matrix-org/matrix-js-sdk/pull/1431)
+ * Remove leftover bits of TSLint
+   [\#1430](https://github.com/matrix-org/matrix-js-sdk/pull/1430)
+
+Changes in [8.0.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.0.1) (2020-08-05)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v8.0.1-rc.1...v8.0.1)
+
+ * Filter out non-string display names
+   [\#1434](https://github.com/matrix-org/matrix-js-sdk/pull/1434)
+
+Changes in [8.0.1-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.0.1-rc.1) (2020-07-31)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v8.0.0...v8.0.1-rc.1)
+
+ * Remove redundant lint dependencies
+   [\#1426](https://github.com/matrix-org/matrix-js-sdk/pull/1426)
+ * Upload all keys when we start using a new key backup version
+   [\#1428](https://github.com/matrix-org/matrix-js-sdk/pull/1428)
+ * Expose countSessionsNeedingBackup
+   [\#1429](https://github.com/matrix-org/matrix-js-sdk/pull/1429)
+ * Configure and use new eslint package
+   [\#1422](https://github.com/matrix-org/matrix-js-sdk/pull/1422)
+
+Changes in [8.0.0](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v8.0.0) (2020-07-27)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v7.1.0...v8.0.0)
+
+BREAKING CHANGES
+---
+
+* `RoomState` events changed to use a Map instead of an object, which changes the collection APIs available to access them.
+ 
+All Changes
+---
+
+ * Properly support txnId
+   [\#1424](https://github.com/matrix-org/matrix-js-sdk/pull/1424)
+ * [BREAKING] Remove deprecated getIdenticonUri
+   [\#1423](https://github.com/matrix-org/matrix-js-sdk/pull/1423)
+ * Bump lodash from 4.17.15 to 4.17.19
+   [\#1421](https://github.com/matrix-org/matrix-js-sdk/pull/1421)
+ * [BREAKING] Convert RoomState's stored state map to a real map
+   [\#1419](https://github.com/matrix-org/matrix-js-sdk/pull/1419)
+
+Changes in [7.1.0](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v7.1.0) (2020-07-03)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v7.1.0-rc.1...v7.1.0)
+
+* No changes since rc.1
+
+Changes in [7.1.0-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v7.1.0-rc.1) (2020-07-01)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v7.0.0...v7.1.0-rc.1)
+
+ * Ask general crypto callbacks for 4S privkey if operation adapter doesn't
+   have it yet
+   [\#1414](https://github.com/matrix-org/matrix-js-sdk/pull/1414)
+ * Fix ICreateClientOpts missing idBaseUrl
+   [\#1413](https://github.com/matrix-org/matrix-js-sdk/pull/1413)
+ * Increase max event listeners for rooms
+   [\#1411](https://github.com/matrix-org/matrix-js-sdk/pull/1411)
+ * Don't trust keys megolm received from backup for verifying the sender
+   [\#1406](https://github.com/matrix-org/matrix-js-sdk/pull/1406)
+ * Raise the last known account data / state event for an update
+   [\#1410](https://github.com/matrix-org/matrix-js-sdk/pull/1410)
+ * Isolate encryption bootstrap side-effects
+   [\#1380](https://github.com/matrix-org/matrix-js-sdk/pull/1380)
+ * Add method to get current in-flight to-device requests
+   [\#1405](https://github.com/matrix-org/matrix-js-sdk/pull/1405)
+
+Changes in [7.0.0](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v7.0.0) (2020-06-23)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v7.0.0-rc.1...v7.0.0)
+
+* No changes since rc.1
+
+Changes in [7.0.0-rc.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v7.0.0-rc.1) (2020-06-17)
+==========================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v6.2.2...v7.0.0-rc.1)
+
+BREAKING CHANGES
+---
+
+ * Presence lists were removed from the spec in r0.5.0, and the corresponding methods have now been removed here as well:
+   * `getPresenceList`
+   * `inviteToPresenceList`
+   * `dropFromPresenceList`
+
+All changes
+---
+
+ * Remove support for unspecced device-specific push rules
+   [\#1404](https://github.com/matrix-org/matrix-js-sdk/pull/1404)
+ * Use existing session id for fetching flows as to not get a new session
+   [\#1403](https://github.com/matrix-org/matrix-js-sdk/pull/1403)
+ * Upgrade deps
+   [\#1400](https://github.com/matrix-org/matrix-js-sdk/pull/1400)
+ * Bring back backup key format migration
+   [\#1398](https://github.com/matrix-org/matrix-js-sdk/pull/1398)
+ * Fix: more informative error message when we cant find a key to decrypt with
+   [\#1313](https://github.com/matrix-org/matrix-js-sdk/pull/1313)
+ * Add js-sdk mechanism for polling client well-known for config
+   [\#1394](https://github.com/matrix-org/matrix-js-sdk/pull/1394)
+ * Fix verification request timeouts to match spec
+   [\#1388](https://github.com/matrix-org/matrix-js-sdk/pull/1388)
+ * Drop presence list methods
+   [\#1391](https://github.com/matrix-org/matrix-js-sdk/pull/1391)
+ * Batch up URL previews to prevent excessive requests
+   [\#1395](https://github.com/matrix-org/matrix-js-sdk/pull/1395)
+
+Changes in [6.2.2](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v6.2.2) (2020-06-16)
+================================================================================================
+[Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v6.2.1...v6.2.2)
+
+ * Use existing session id for fetching flows as to not get a new session
+   [\#1407](https://github.com/matrix-org/matrix-js-sdk/pull/1407)
+
 Changes in [6.2.1](https://github.com/matrix-org/matrix-js-sdk/releases/tag/v6.2.1) (2020-06-05)
 ================================================================================================
 [Full Changelog](https://github.com/matrix-org/matrix-js-sdk/compare/v6.2.0...v6.2.1)

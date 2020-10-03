@@ -21,6 +21,7 @@ import {MatrixEvent} from "../../../src/models/event";
 import {TestClient} from '../../TestClient';
 import {makeTestClients} from './verification/util';
 import {encryptAES} from "../../../src/crypto/aes";
+import {resetCrossSigningKeys, createSecretStorageKey} from "./crypto-utils";
 
 import * as utils from "../../../src/utils";
 
@@ -190,7 +191,7 @@ describe("Secrets", function() {
                 }),
             ]);
         };
-        alice.resetCrossSigningKeys();
+        resetCrossSigningKeys(alice);
 
         const newKeyId = await alice.addSecretStorageKey(
             SECRET_STORAGE_ALGORITHM_V1_AES,
@@ -325,7 +326,12 @@ describe("Secrets", function() {
                 this.emit("accountData", event);
             };
 
-            await bob.bootstrapSecretStorage();
+            await bob.bootstrapCrossSigning({
+                authUploadDeviceSigningKeys: async func => await func({}),
+            });
+            await bob.bootstrapSecretStorage({
+                createSecretStorageKey,
+            });
 
             const crossSigning = bob._crypto._crossSigningInfo;
             const secretStorage = bob._crypto._secretStorage;
@@ -375,6 +381,9 @@ describe("Secrets", function() {
             const secretStorage = bob._crypto._secretStorage;
 
             // Set up cross-signing keys from scratch with specific storage key
+            await bob.bootstrapCrossSigning({
+                authUploadDeviceSigningKeys: async func => await func({}),
+            });
             await bob.bootstrapSecretStorage({
                 createSecretStorageKey: async () => ({
                     // `pubkey` not used anymore with symmetric 4S
@@ -389,7 +398,9 @@ describe("Secrets", function() {
                 crossSigning.toStorage(),
             );
             crossSigning.keys = {};
-            await bob.bootstrapSecretStorage();
+            await bob.bootstrapCrossSigning({
+                authUploadDeviceSigningKeys: async func => await func({}),
+            });
 
             expect(crossSigning.getId()).toBeTruthy();
             expect(await crossSigning.isStoredInSecretStorage(secretStorage))

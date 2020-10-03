@@ -701,7 +701,7 @@ SyncApi.prototype._syncFromCache = async function(savedSync) {
 
     try {
         await this._processSyncResponse(syncEventData, data);
-    } catch(e) {
+    } catch (e) {
         logger.error("Error processing cached sync", e.stack || e);
     }
 
@@ -774,7 +774,7 @@ SyncApi.prototype._sync = async function(syncOptions) {
 
     try {
         await this._processSyncResponse(syncEventData, data);
-    } catch(e) {
+    } catch (e) {
         // log the exception with stack if we have it, else fall back
         // to the plain description
         logger.error("Caught /sync error", e.stack || e);
@@ -894,7 +894,7 @@ SyncApi.prototype._onSyncError = function(err, syncOptions) {
     logger.error("/sync error %s", err);
     logger.error(err);
 
-    if(this._shouldAbortSync(err)) {
+    if (this._shouldAbortSync(err)) {
         return;
     }
 
@@ -1023,18 +1023,23 @@ SyncApi.prototype._processSyncResponse = async function(
     // handle non-room account_data
     if (data.account_data && utils.isArray(data.account_data.events)) {
         const events = data.account_data.events.map(client.getEventMapper());
+        const prevEventsMap = events.reduce((m, c) => {
+            m[c.getId()] = client.store.getAccountData(c.getType());
+            return m;
+        }, {});
         client.store.storeAccountDataEvents(events);
         events.forEach(
             function(accountDataEvent) {
                 // Honour push rules that come down the sync stream but also
                 // honour push rules that were previously cached. Base rules
-                // will be updated when we recieve push rules via getPushRules
+                // will be updated when we receive push rules via getPushRules
                 // (see SyncApi.prototype.sync) before syncing over the network.
                 if (accountDataEvent.getType() === 'm.push_rules') {
                     const rules = accountDataEvent.getContent();
                     client.pushRules = PushProcessor.rewriteDefaultRules(rules);
                 }
-                client.emit("accountData", accountDataEvent);
+                const prevEvent = prevEventsMap[accountDataEvent.getId()];
+                client.emit("accountData", accountDataEvent, prevEvent);
                 return accountDataEvent;
             },
         );

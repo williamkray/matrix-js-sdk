@@ -130,7 +130,11 @@ User.prototype.setPresenceEvent = function(event) {
  */
 User.prototype.setDisplayName = function(name) {
     const oldName = this.displayName;
-    this.displayName = name;
+    if (typeof name === "string") {
+        this.displayName = name;
+    } else {
+        this.displayName = undefined;
+    }
     if (name !== oldName) {
         this._updateModifiedTime();
     }
@@ -143,7 +147,11 @@ User.prototype.setDisplayName = function(name) {
  * @param {string} name The new display name.
  */
 User.prototype.setRawDisplayName = function(name) {
-    this.rawDisplayName = name;
+    if (typeof name === "string") {
+        this.rawDisplayName = name;
+    } else {
+        this.rawDisplayName = undefined;
+    }
 };
 
 
