@@ -475,9 +475,9 @@ SyncApi.prototype.sync = function() {
 
     this._running = true;
 
-    if (global.document) {
+    if (global.window) {
         this._onOnlineBound = this._onOnline.bind(this);
-        global.document.addEventListener("online", this._onOnlineBound, false);
+        global.window.addEventListener("online", this._onOnlineBound, false);
     }
 
     let savedSyncPromise = Promise.resolve();
@@ -643,8 +643,8 @@ SyncApi.prototype.sync = function() {
  */
 SyncApi.prototype.stop = function() {
     debuglog("SyncApi.stop");
-    if (global.document) {
-        global.document.removeEventListener("online", this._onOnlineBound, false);
+    if (global.window) {
+        global.window.removeEventListener("online", this._onOnlineBound, false);
         this._onOnlineBound = undefined;
     }
     this._running = false;
@@ -1360,6 +1360,16 @@ SyncApi.prototype._processSyncResponse = async function(
     if (this.opts.crypto && data.device_one_time_keys_count) {
         const currentCount = data.device_one_time_keys_count.signed_curve25519 || 0;
         this.opts.crypto.updateOneTimeKeyCount(currentCount);
+    }
+    if (this.opts.crypto && data["org.matrix.msc2732.device_unused_fallback_key_types"]) {
+        // The presence of device_unused_fallback_key_types indicates that the
+        // server supports fallback keys. If there's no unused
+        // signed_curve25519 fallback key we need a new one.
+        const unusedFallbackKeys = data["org.matrix.msc2732.device_unused_fallback_key_types"];
+        this.opts.crypto.setNeedsNewFallback(
+            unusedFallbackKeys instanceof Array &&
+            !unusedFallbackKeys.includes("signed_curve25519"),
+        );
     }
 };
 
