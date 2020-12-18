@@ -30,6 +30,7 @@ import {RoomMember} from "./room-member";
 import {RoomSummary} from "./room-summary";
 import {logger} from '../logger';
 import {ReEmitter} from '../ReEmitter';
+import {EventType, RoomCreateTypeField, RoomType} from "../@types/event";
 
 // These constants are used as sane defaults when the homeserver doesn't support
 // the m.room_versions capability. In practice, KNOWN_SAFE_ROOM_VERSION should be
@@ -1822,13 +1823,50 @@ Room.prototype.getAccountData = function(type) {
 
 
 /**
- * Returns wheter the syncing user has permission to send a message in the room
+ * Returns whether the syncing user has permission to send a message in the room
  * @return {boolean} true if the user should be permitted to send
  *                   message events into the room.
  */
 Room.prototype.maySendMessage = function() {
     return this.getMyMembership() === 'join' &&
         this.currentState.maySendEvent('m.room.message', this.myUserId);
+};
+
+/**
+ * Returns the type of the room from the `m.room.create` event content or undefined if none is set
+ * @returns {?string} the type of the room. Currently only RoomType.Space is known.
+ */
+Room.prototype.getType = function() {
+    const createEvent = this.currentState.getStateEvents("m.room.create", "");
+    if (!createEvent) {
+        logger.warn("Room " + this.roomId + " does not have an m.room.create event");
+        return undefined;
+    }
+    return createEvent.getContent()[RoomCreateTypeField];
+};
+
+/**
+ * Returns whether the room is a space-room as defined by MSC1772.
+ * @returns {boolean} true if the room's type is RoomType.Space
+ */
+Room.prototype.isSpaceRoom = function() {
+    return this.getType() === RoomType.Space;
+};
+
+/**
+ * Returns whether the given user has permissions to issue an invite for this room.
+ * @param {string} userId the ID of the Matrix user to check permissions for
+ * @returns {boolean} true if the user should be permitted to issue invites for this room.
+ */
+Room.prototype.canInvite = function(userId) {
+    let canInvite = this.getMyMembership() === "join";
+    const powerLevelsEvent = this.currentState.getStateEvents(EventType.RoomPowerLevels, "");
+    const powerLevels = powerLevelsEvent && powerLevelsEvent.getContent();
+    const me = this.getMember(userId);
+    if (powerLevels && me && powerLevels.invite > me.powerLevel) {
+        canInvite = false;
+    }
+    return canInvite;
 };
 
 /**
