@@ -2357,6 +2357,9 @@ MatrixClient.prototype.getVisibleRooms = function() {
         if (tombstone && replacedRooms.has(r.roomId)) {
             return false;
         }
+        if (r.isSpaceRoom()) {
+            return false;
+        }
         return true;
     });
 };
