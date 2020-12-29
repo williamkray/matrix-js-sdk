@@ -1870,6 +1870,14 @@ Room.prototype.canInvite = function(userId) {
 };
 
 /**
+ * Returns the join rule based on the m.room.join_rule state event, defaulting to `invite`.
+ * @returns {string} the join_rule applied to this room
+ */
+Room.prototype.getJoinRule = function() {
+    return this.currentState.getJoinRule();
+};
+
+/**
  * This is an internal method. Calculates the name of the room from the current
  * room state.
  * @param {Room} room The matrix room.
