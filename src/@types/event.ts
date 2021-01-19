@@ -38,7 +38,7 @@ export enum EventType {
 
     // Spaces MSC1772
     SpaceChild = "org.matrix.msc1772.space.child",
-    RoomParent = "org.matrix.msc1772.room.parent",
+    SpaceParent = "org.matrix.msc1772.space.parent",
     RoomPowerLevelMappings = "org.matrix.msc1772.room.power_level_mappings",
 
     // Room timeline events
