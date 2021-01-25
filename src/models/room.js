@@ -38,8 +38,8 @@ import {EventType, RoomCreateTypeField, RoomType} from "../@types/event";
 // room versions which are considered okay for people to run without being asked
 // to upgrade (ie: "stable"). Eventually, we should remove these when all homeservers
 // return an m.room_versions capability.
-const KNOWN_SAFE_ROOM_VERSION = '5';
-const SAFE_ROOM_VERSIONS = ['1', '2', '3', '4', '5'];
+const KNOWN_SAFE_ROOM_VERSION = '6';
+const SAFE_ROOM_VERSIONS = ['1', '2', '3', '4', '5', '6'];
 
 function synthesizeReceipt(userId, event, receiptType) {
     // console.log("synthesizing receipt for "+event.getId());

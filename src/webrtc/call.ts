@@ -27,6 +27,8 @@ import * as utils from '../utils';
 import MatrixEvent from '../models/event';
 import {EventType} from '../@types/event';
 import { RoomMember } from '../models/room-member';
+import { randomString } from '../randomstring';
+import { MCallReplacesEvent, MCallAnswer, MCallOfferNegotiate, CallCapabilities } from './callEventTypes';
 
 // events: hangup, error(err), replaced(call), state(state, oldState)
 
@@ -194,6 +196,10 @@ export class CallError extends Error {
     }
 }
 
+function genCallID() {
+    return Date.now() + randomString(16);
+}
+
 /**
  * Construct a new Matrix Call.
  * @constructor
@@ -240,6 +246,7 @@ export class MatrixCall extends EventEmitter {
     // The party ID of the other side: undefined if we haven't chosen a partner
     // yet, null if we have but they didn't send a party ID.
     private opponentPartyId: string;
+    private opponentCaps: CallCapabilities;
     private inviteTimeout: NodeJS.Timeout; // in the browser it's 'number'
 
     // The logic of when & if a call is on hold is nontrivial and explained in is*OnHold
@@ -275,7 +282,7 @@ export class MatrixCall extends EventEmitter {
             utils.checkObjectHasKeys(server, ["urls"]);
         }
 
-        this.callId = "c" + new Date().getTime() + Math.random();
+        this.callId = genCallID();
         this.state = CallState.Fledgling;
 
         // A queue for candidates waiting to go out.
@@ -356,6 +363,10 @@ export class MatrixCall extends EventEmitter {
 
     getOpponentMember() {
         return this.opponentMember;
+    }
+
+    opponentCanBeTransferred() {
+        return Boolean(this.opponentCaps && this.opponentCaps["m.call.transferee"]);
     }
 
     /**
@@ -469,7 +480,11 @@ export class MatrixCall extends EventEmitter {
 
         this.setState(CallState.Ringing);
         this.opponentVersion = this.msg.version;
-        this.opponentPartyId = this.msg.party_id || null;
+        if (this.opponentVersion !== 0) {
+            // ignore party ID in v0 calls: party ID isn't a thing until v1
+            this.opponentPartyId = this.msg.party_id || null;
+        }
+        this.opponentCaps = this.msg.capabilities || {};
         this.opponentMember = event.sender;
 
         if (event.getLocalAge()) {
@@ -694,6 +709,21 @@ export class MatrixCall extends EventEmitter {
         return callOnHold;
     }
 
+    /**
+     * Sends a DTMF digit to the other party
+     * @param digit The digit (nb. string - '#' and '*' are dtmf too)
+     */
+    sendDtmfDigit(digit: string) {
+        for (const sender of this.peerConn.getSenders()) {
+            if (sender.track.kind === 'audio' && sender.dtmf) {
+                sender.dtmf.insertDTMF(digit);
+                return;
+            }
+        }
+
+        throw new Error("Unable to find a track to send DTMF on");
+    }
+
     private updateMuteStatus() {
         if (!this.localAVStream) {
             return;
@@ -779,7 +809,14 @@ export class MatrixCall extends EventEmitter {
                 // required to still be sent for backwards compat
                 type: this.peerConn.localDescription.type,
             },
-        };
+        } as MCallAnswer;
+
+        if (this.client._supportsCallTransfer) {
+            answerContent.capabilities = {
+                'm.call.transferee': true,
+            }
+        }
+
         // We have just taken the local description from the peerconnection which will
         // contain all the local candidates added so far, so we can discard any candidates
         // we had queued up because they'll be in the answer.
@@ -959,7 +996,10 @@ export class MatrixCall extends EventEmitter {
         }
 
         this.opponentVersion = event.getContent().version;
-        this.opponentPartyId = event.getContent().party_id || null;
+        if (this.opponentVersion !== 0) {
+            this.opponentPartyId = event.getContent().party_id || null;
+        }
+        this.opponentCaps = event.getContent().capabilities || {};
         this.opponentMember = event.sender;
 
         this.setState(CallState.Connecting);
@@ -1044,8 +1084,21 @@ export class MatrixCall extends EventEmitter {
             await this.peerConn.setRemoteDescription(description);
 
             if (description.type === 'offer') {
+                // First we sent the direction of the tranciever to what we'd like it to be,
+                // irresepective of whether the other side has us on hold - so just whether we
+                // want the call to be on hold or not. This is necessary because in a few lines,
+                // we'll adjust the direction and unless we do this too, we'll never come off hold.
+                for (const tranceiver of this.peerConn.getTransceivers()) {
+                    tranceiver.direction = this.isRemoteOnHold() ? 'inactive' : 'sendrecv';
+                }
                 const localDescription = await this.peerConn.createAnswer();
                 await this.peerConn.setLocalDescription(localDescription);
+                // Now we've got our answer, set the direction to the outcome of the negotiation.
+                // We need to do this otherwise Firefox will notice that the direction is not the
+                // currentDirection and try to negotiate itself off hold again.
+                for (const tranceiver of this.peerConn.getTransceivers()) {
+                    tranceiver.direction = tranceiver.currentDirection;
+                }
 
                 this.sendVoipEvent(EventType.CallNegotiate, {
                     description: this.peerConn.localDescription,
@@ -1096,13 +1149,24 @@ export class MatrixCall extends EventEmitter {
 
         if (this.callHasEnded()) return;
 
-        const keyName = this.state === CallState.CreateOffer ? 'offer' : 'description';
         const eventType = this.state === CallState.CreateOffer ? EventType.CallInvite : EventType.CallNegotiate;
 
         const content = {
-            [keyName]: this.peerConn.localDescription,
             lifetime: CALL_TIMEOUT_MS,
-        };
+        } as MCallOfferNegotiate;
+
+        // clunky because TypeScript can't folow the types through if we use an expression as the key
+        if (this.state === CallState.CreateOffer) {
+            content.offer = this.peerConn.localDescription;
+        } else {
+            content.description = this.peerConn.localDescription;
+        }
+
+        if (this.client._supportsCallTransfer) {
+            content.capabilities = {
+                'm.call.transferee': true,
+            }
+        }
 
         // Get rid of any candidates waiting to be sent: they'll be included in the local
         // description we just got and will send in the offer.
@@ -1178,7 +1242,7 @@ export class MatrixCall extends EventEmitter {
             return; // because ICE can still complete as we're ending the call
         }
         logger.debug(
-            "ICE connection state changed to: " + this.peerConn.iceConnectionState,
+            "Call ID " + this.callId + ": ICE connection state changed to: " + this.peerConn.iceConnectionState,
         );
         // ideally we'd consider the call to be connected when we get media but
         // chrome doesn't implement any of the 'onstarted' events yet
@@ -1296,7 +1360,7 @@ export class MatrixCall extends EventEmitter {
     }
 
     onHangupReceived = (msg) => {
-        logger.debug("Hangup received");
+        logger.debug("Hangup received for call ID " + + this.callId);
 
         // party ID must match (our chosen partner hanging up the call) or be undefined (we haven't chosen
         // a partner yet but we're treating the hangup as a reject as per VoIP v0)
@@ -1309,7 +1373,7 @@ export class MatrixCall extends EventEmitter {
     };
 
     onRejectReceived = (msg) => {
-        logger.debug("Reject received");
+        logger.debug("Reject received for call ID " + this.callId);
 
         // No need to check party_id for reject because if we'd received either
         // an answer or reject, we wouldn't be in state InviteSent
@@ -1331,7 +1395,7 @@ export class MatrixCall extends EventEmitter {
     };
 
     onAnsweredElsewhere = (msg) => {
-        logger.debug("Answered elsewhere");
+        logger.debug("Call ID " + this.callId + " answered elsewhere");
         this.terminate(CallParty.Remote, CallErrorCode.AnsweredElsewhere, true);
     };
 
@@ -1377,6 +1441,28 @@ export class MatrixCall extends EventEmitter {
                 this.sendCandidateQueue();
             }, delay);
         }
+    }
+
+    async transfer(targetUserId: string, targetRoomId?: string) {
+        // Fetch the target user's global profile info: their room avatar / displayname
+        // could be different in whatever room we shae with them.
+        const profileInfo = await this.client.getProfileInfo(targetUserId);
+
+        const replacementId = genCallID();
+
+        const body = {
+            replacement_id: genCallID(),
+            target_user: {
+                id: targetUserId,
+                display_name: profileInfo.display_name,
+                avatar_url: profileInfo.avatar_url,
+            },
+            create_call: replacementId,
+        } as MCallReplacesEvent;
+
+        if (targetRoomId) body.target_room = targetRoomId;
+
+        return this.sendVoipEvent(EventType.CallReplaces, body);
     }
 
     private async terminate(hangupParty: CallParty, hangupReason: CallErrorCode, shouldEmit: boolean) {
@@ -1605,7 +1691,8 @@ export function setVideoInput(deviceId: string) { videoInput = deviceId; }
 export function createNewMatrixCall(client: any, roomId: string, options?: CallOpts) {
     // typeof prevents Node from erroring on an undefined reference
     if (typeof(window) === 'undefined' || typeof(document) === 'undefined') {
-        logger.info("No window or document object: WebRTC is not supported in this environment");
+        // NB. We don't log here as apps try to create a call object as a test for
+        // whether calls are supported, so we shouldn't fill the logs up.
         return null;
     }
 
