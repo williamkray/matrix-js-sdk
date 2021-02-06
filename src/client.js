@@ -180,6 +180,9 @@ function keyFromRecoverySession(session, decryptionKey) {
  * @param {boolean} [opts.forceTURN]
  * Optional. Whether relaying calls through a TURN server should be forced.
  *
+ * @param {boolean} [opts.supportsCallTransfer]
+ * Optional. True to advertise support for call transfers to other parties on Matrix calls.
+ *
  * @param {boolean} [opts.fallbackICEServerAllowed]
  * Optional. Whether to allow a fallback ICE server should be used for negotiating a
  * WebRTC connection if the homeserver doesn't provide any servers. Defaults to false.
@@ -364,6 +367,7 @@ export function MatrixClient(opts) {
     this._cryptoCallbacks = opts.cryptoCallbacks || {};
 
     this._forceTURN = opts.forceTURN || false;
+    this._supportsCallTransfer = opts.supportsCallTransfer || false;
     this._fallbackICEServerAllowed = opts.fallbackICEServerAllowed || false;
 
     // List of which rooms have encryption enabled: separate from crypto because
@@ -694,6 +698,14 @@ MatrixClient.prototype.supportsVoip = function() {
  */
 MatrixClient.prototype.setForceTURN = function(forceTURN) {
     this._forceTURN = forceTURN;
+};
+
+/**
+ * Set whether to advertise transfer support to other parties on Matrix calls.
+ * @param {bool} supportsCallTransfer True to advertise the 'm.call.transferee' capability
+ */
+MatrixClient.prototype.setSupportsCallTransfer = function(supportsCallTransfer) {
+    this._supportsCallTransfer = supportsCallTransfer;
 };
 
 /**
@@ -3829,6 +3841,19 @@ MatrixClient.prototype.setPresence = function(opts, callback) {
     );
 };
 
+/**
+ * @param {string} userId The user to get presence for
+ * @param {module:client.callback} callback Optional.
+ * @return {Promise} Resolves: The presence state for this user.
+ * @return {module:http-api.MatrixError} Rejects: with an error response.
+ */
+MatrixClient.prototype.getPresence = function(userId, callback) {
+    const path = utils.encodeUri("/presence/$userId/status", {
+        $userId: userId,
+    });
+
+    return this._http.authedRequest(callback, "GET", path, undefined, undefined);
+};
 
 /**
  * Retrieve older messages from the given room and put them in the timeline.
@@ -5132,6 +5157,26 @@ MatrixClient.prototype._storeClientOptions = function() {
 };
 
 /**
+ * Gets a set of room IDs in common with another user
+ * @param {string} userId The userId to check.
+ * @return {Promise<string[]>} Resolves to a set of rooms
+ * @return {module:http-api.MatrixError} Rejects: with an error response.
+ */
+MatrixClient.prototype._unstable_getSharedRooms = async function(userId) {
+    if (!(await this.doesServerSupportUnstableFeature("uk.half-shot.msc2666"))) {
+        throw Error('Server does not support shared_rooms API');
+    }
+    const path = utils.encodeUri("/uk.half-shot.msc2666/user/shared_rooms/$userId", {
+        $userId: userId,
+    });
+    const res = await this._http.authedRequest(
+        undefined, "GET", path, undefined, undefined,
+        {prefix: PREFIX_UNSTABLE},
+    );
+    return res.joined;
+};
+
+/**
  * High level helper method to stop the client from polling and allow a
  * clean shutdown.
  */
@@ -5393,6 +5438,11 @@ function checkTurnServers(client) {
         }
     }, function(err) {
         logger.error("Failed to get TURN URIs");
+        // If we get a 403, there's no point in looping forever.
+        if (err.httpStatus === 403) {
+            logger.info("TURN access unavailable for this account");
+            return;
+        }
         client._checkTurnServersTimeoutID = setTimeout(function() {
             checkTurnServers(client);
         }, 60000);
